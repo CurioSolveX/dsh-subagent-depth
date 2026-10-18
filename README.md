@@ -5,6 +5,15 @@
 > **这不是新能力。** 递归深度上限是 DeepSeek Harness 内置的（设置 → Subagent → 最大递归深度）。
 > 本插件只补一个顺手入口，读写的是同一份配置，与设置页双向一致。
 
+插件一共四件事，每一件都可以单独关掉：
+
+| | 是什么 | 默认 |
+|---|---|---|
+| **深度控件** | 输入栏那个「子代理 0/1/2」 | 开 |
+| **每层配额** | 同一棵树里，1 级最多 5 个、2 级最多 8 个同时运行 | 开（可改数） |
+| **委派评审员** | 放行前让另一个模型审一次（allow / ask / deny） | 配了模型才生效 |
+| **意见专家（Consultant）** | 复杂委派先问顾问，顾问只出主意，**决定权仍在做事的 Agent** | 关（要手动打开） |
+
 输入栏里的样子（无边框，与旁边的「自动审查」同为 13px，融进工具行）：
 
 ![输入栏里的样子](docs/idle.png)
@@ -77,6 +86,71 @@ React <select>  ──change──▶  ConfigFormController.set("maxDepth", n)
 
 两者顺序是固定的：**先判配额（便宜、确定），通过了才花一次模型调用去审形状**。
 
+## 意见专家（Consultant，可选，默认关闭）
+
+一句话：**顾问只出主意，派活和验收始终由做事的 Agent 自己决定。**
+
+常见的组织方式是「干活的模型 + 一个更会想的模型」：干活的模型觉得某个活难，先问顾问怎么拆、要几个人；顾问给建议，干活的模型**可以不听、可以改人数**，最后按自己的判断派。本插件把这套流程做进工具里。
+
+### 开启后会发生什么
+
+1. **简单任务照旧。** 直接调 `subagent`，插件用一个便宜模型（默认就是主 Agent 自己的模型）判断难不难；不难就放行，和没装顾问时一样。
+2. **复杂任务会被拦下。** `subagent` 返回一条错误，原文形如
+   `This delegation looks complex, so subagent was refused before anything started.`
+   并提示你改调 `delegate`。
+3. **第一步只问不派。** 调 `delegate`，带上你**自己写的** `need`（为什么难、想怎么拆、约束是什么、什么叫完成）和 `prompt`。这一级的顾问回答，**不启动任何子代理**。
+4. **第二步由你拍板。** 看完建议，自己写 `plan`：几个人、每人用什么模型、每人的验收标准。再调 `delegate(plan=[...])`，**只有这个 plan 会真的执行**。
+   - `plan[].acceptance` 每一条都会变成子代理**必须交回的结构化字段**（`done` / `summary` / `evidence` / `unmet`），交不出来不算完成。
+   - `plan[].provider` / `plan[].model` 让每个子代理走不同模型（例如一个 flash 干活、一个 pro 复核）。
+
+5. **`consult` 工具**：干活卡住时随时问顾问，只答疑、不派活，也不能替你验收。
+
+### 配置
+
+| 字段 | 含义 | 默认 |
+|---|---|---|
+| `consultantEnabled` | 总开关。关 = 完全不拦官方派活工具 | `false` |
+| `consultant0Provider` / `consultant0Model` | **0 级**顾问：主 Agent 问的那个 | 空 = 不启用 |
+| `consultant1Provider` / `consultant1Model` | **1 级**顾问：子代理问的那个 | 空 = 不启用 |
+| `consultantMode` | `smart`（先筛难度，难才问）/ `always`（每次派活都问） | `smart` |
+| `screenerProvider` / `screenerModel` | 判断难度的便宜模型；空 = 用主 Agent 自己的模型 | 空 |
+
+两条**独立路由**，可以填不同的模型。填的是 DSH 里**已经配好的** provider / model，所以 Kimi、Claude、GPT、Gemini、GLM 之类都可以——按任务性质挑：
+比如顶层规划用最会做计划的模型，1 级用某个领域专家。
+
+```yaml
+# profile 的 cordis.patch.yml（设置页改的就是这里）
+- id: subagent-depth
+  config:
+    consultantEnabled: true
+    consultant0Provider: deepseek-account
+    consultant0Model: deepseek-v4-pro      # 顶层顾问
+    consultant1Provider: deepseek-account
+    consultant1Model: deepseek-flash       # 1 级顾问（可换成领域模型）
+    consultantMode: smart
+```
+
+### 花费
+
+| 什么时候 | 花什么 |
+|---|---|
+| 每次委派 | 1 次筛子调用（默认主模型，便宜） |
+| 判定为复杂时 | 1 次顾问调用（模型越贵越明显） |
+| 评审员开着时 | 再加 1 次评审调用，**和顾问是两笔** |
+
+嫌贵可以：把 `consultantMode` 设为 `smart`（而不是 `always`）、把顾问换成便宜模型、或把 `reviewMode` 设成 `off` 只留顾问。
+
+### 失败时不会卡死
+
+顾问没配、路由写错、调用超时、回的是空话——**一律不拦委派**：`delegate` 会明确说「顾问暂时不可用」，你再带 `plan` 调一次就按自己的判断派。筛子自己失败时按「复杂」处理（宁可多问一次，不放过难任务）。
+
+### 一些限制（诚实写在这里）
+
+- 筛子只读你给的文字，判断可能过严或过松；过严的代价只是多问一次顾问。
+- 同一个任务被拒后 10 分钟内再调同一个 `subagent` 会直接拒（不再重复花筛子钱），提示仍然指向 `delegate`。
+- `delegate` 是本插件新增的工具，官方 `subagent` / `subagent_fork` 原样保留；顾问关闭时它们完全不受影响。
+- 计划里的模型路由必须是 DSH 认得的路由，写错会在启动子代理时报错（此时会如实报告已启动几个）。
+
 ## 一个容易踩的坑
 
 `subagent` 之外，`tool-subagent` / `tool-subagent-fork` 也各自有 `maxDepth`，而且**工具级优先**
@@ -96,7 +170,10 @@ React <select>  ──change──▶  ConfigFormController.set("maxDepth", n)
 ## 兼容性
 
 在 DSH 桌面版 `0.2.1-rc.2` / profile `desktop` 上实机验证。用到的接口：
-`ctx.slots`、`ctx.locale`、`ctx.configForms`、`ctx.remote.settings.mutate`、`configEditor`。
+`ctx.slots`、`ctx.locale`、`ctx.configForms`、`ctx.remote.settings.mutate`、`configEditor`（客户端）；
+`ctx.tools`、`ctx.subagents`、`ctx.agents`、`ctx.llm`、`ctx.systemPrompt`（Host）。
+
+Host 半部的工具注册走官方 `dsh-tool-subagent` 自己用的那条路：`agent/created` → `agent.ctx.inject([...])` → `tools.register`。`delegate` / `consult` 是新名字，不和官方的 `subagent` / `subagent_fork` 抢同一个作用域。
 
 ## 风险
 
@@ -106,6 +183,8 @@ React <select>  ──change──▶  ConfigFormController.set("maxDepth", n)
 | API 漂移 | DSH 升级改了服务名 | 只用已确认存在的 API；`inject` 声明硬依赖，缺服务时不激活而不是抛错 |
 | 与设置页同时写 | revision 冲突 | 交给 Host 的 revision 校验，不强行覆盖 |
 | 默认值 | 官方默认 `maxDepth` 是 `1` | 本插件不改默认值，只做显示与切换 |
+| 顾问把任务判难/判易 | 筛子只读文字 | 判难 → 多问一次顾问；判易 → 和没开顾问一样；筛子自己失败按「难」处理 |
+| 顾问调用失败 | 模型挂了、路由写错 | 一律降级放行，`plan` 照样能派 |
 
 ## 回滚 / 卸载
 
@@ -129,7 +208,7 @@ Remove-Item -Path '<profile>\node_modules\dsh-subagent-depth' -Force
 
 ```
 client.js          浏览器半部：控件本身
-index.js           Host 半部：空实现（bundle 需要一行可挂载的包）
+index.js           Host 半部：配置、每层配额、委派评审员、意见专家（delegate / consult）
 cordis.patch.yml   插入 bundle 行
 locale/en.json     插件列表里的标题与描述
 locale/zh.json
@@ -137,14 +216,23 @@ icon.svg
 docs/              README 截图
 ```
 
+Host 半部主要函数：
+
+| 函数 | 干什么 |
+|---|---|
+| `installGuard` | `tools/pre-execute` 闸门：配额、评审员、复杂委派拦截 |
+| `installConsultant` | 给每个 Agent 的作用域挂 `delegate` / `consult` 与提示语 |
+| `runDelegate` | 两步协议：先问顾问（不派），再按 `plan` 派（带模型与 `outputSchema`） |
+| `askConsultant` / `needsConsultant` | 顾问与筛子的模型调用，失败一律降级 |
+
 ## 关于本项目的来源（免责声明）
 
 本项目的全部内容——代码、README、提交信息、验收记录——由 AI 助手（DeepSeek Harness 中的编码 Agent）
 全程编写与实机验证。使用者不写代码，不是程序员，只负责提出需求、判断产品表现、并在关键决策点拍板。
 
 所有技术结论都以实测为准：每一条「PASS」背后都有原始报错原文、文件片段或截图，不是推测。
-但**请自行复核**：如果你打算在别的 DSH 版本或生产环境使用，先读一遍 `client.js`（约 340 行，只有一个控件），
-确认它在你那里做的正是你想让它做的事。
+但**请自行复核**：如果你打算在别的 DSH 版本或生产环境使用，先读一遍 `client.js`（约 340 行，只有一个控件）
+和 `index.js`（约 1200 行：配额、评审员、意见专家），确认它在你那里做的正是你想让它做的事。
 
 本项目按 MIT 许可「按原样」提供，不附带任何担保；作者不对因使用本项目造成的任何后果负责。
 
