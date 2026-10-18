@@ -64,6 +64,19 @@ React <select>  ──change──▶  ConfigFormController.set("maxDepth", n)
 
 `maxDepth` 在 schema 里是 `x-cordis.volatile: true`，所以改完立即生效，不需要重启。
 
+## 评审员（可选，默认不启用）
+
+配额只管「几个」，管不了「该不该派」。把评审员接上之后，每次委派在放行前会先问**另一个模型**：
+
+- 设置页填 `reviewerProvider` / `reviewerModel` —— **必须是你已经授权给子智能体的路由**（设置 → Subagent → 允许 Agent 为子智能体选择模型）
+- 填 `policy`：你自己对这个项目的分层原则（什么该派、什么该自己干）
+- 评审员只会回一个 JSON：`{"decision":"allow|ask|deny","reason":"…"}`
+- `allow` 放行 · `ask` 弹给你定 · `deny` 直接拒
+- 评审员调用失败、或回不出合法 JSON 时**一律放行**——守卫不能把委派本身弄坏
+- `reviewMode` 设成 `off` 可以只保留配额、关掉评审
+
+两者顺序是固定的：**先判配额（便宜、确定），通过了才花一次模型调用去审形状**。
+
 ## 一个容易踩的坑
 
 `subagent` 之外，`tool-subagent` / `tool-subagent-fork` 也各自有 `maxDepth`，而且**工具级优先**
