@@ -100,8 +100,12 @@ window.__ModuleLoader__.load({
       quotaLevel2: 'Level 2 · started by level 1',
       quotaFixed: '1 (fixed)',
       quotaTotalPrefix: 'At most',
-      quotaGlobal: 'Global limit (auto-synced) / level sum',
-      quotaTotalSuffix: 'subagents;',
+      quotaGlobal: 'Global limit / derived',
+      quotaMismatch: 'The shipped page disagrees with this table',
+      quotaRecalc: 'Recalculate from depth and levels',
+      quotaWorkers: 'workers',
+      quotaConsultants: 'consultants',
+      quotaTotalSuffix: 'agents (CEO excluded).',
       quotaWithCeo: 'with the CEO that is',
       quotaRoles: 'roles.',
       quotaConsultantNote: 'Consultants do not take these slots: they sit beside the CEO as separate model calls.',
@@ -146,8 +150,12 @@ window.__ModuleLoader__.load({
       quotaLevel2: '2 级 · 1 级再往下派的',
       quotaFixed: '1（固定）',
       quotaTotalPrefix: '同时最多',
-      quotaGlobal: '内置全局上限（自动同步）/ 每层合计',
-      quotaTotalSuffix: '个子代理；',
+      quotaGlobal: '内置全局上限 / 应为',
+      quotaMismatch: '内置页的数字和上表不一致',
+      quotaRecalc: '按深度与上表重新计算',
+      quotaWorkers: '个工人',
+      quotaConsultants: '个顾问',
+      quotaTotalSuffix: '个（不含 CEO）。',
       quotaWithCeo: '加 CEO 共',
       quotaRoles: '个角色。',
       quotaConsultantNote: '意见专家不占这些名额：它们和 CEO 同级，是单独的一次模型调用。',
@@ -423,6 +431,26 @@ window.__ModuleLoader__.load({
       }, [form]);
       var snapshot = react.useSyncExternalStore(subscribe, read);
 
+      // Read-only view of this plugin's own settings, used to keep the shipped
+      // global limit in step with the depth this control selects.
+      var ownForm = props.ownForm;
+      var ownSubscribe = react.useCallback(
+        function (listener) {
+          return ownForm.subscribe(listener);
+        },
+        [ownForm],
+      );
+      var ownRead = react.useCallback(function () {
+        return ownForm.getSnapshot();
+      }, [ownForm]);
+      var ownSnapshot = react.useSyncExternalStore(ownSubscribe, ownRead);
+      var ownValue =
+        ownSnapshot !== undefined && ownSnapshot !== null && ownSnapshot.status === 'ready' && ownSnapshot.value !== null && ownSnapshot.value !== undefined
+          ? ownSnapshot.value
+          : null;
+      var ownLevel1 = ownValue !== null && Number.isFinite(Number(ownValue.level1)) ? Number(ownValue.level1) : 5;
+      var ownLevel2 = ownValue !== null && Number.isFinite(Number(ownValue.level2)) ? Number(ownValue.level2) : 8;
+
       var write = react.useState({ pending: false, failed: false });
       var state = write[0];
       var setState = write[1];
@@ -493,6 +521,12 @@ window.__ModuleLoader__.load({
         Promise.resolve(props.commit([{ op: 'set', path: ['maxDepth'], value: option }]))
           .then(function (accepted) {
             setState({ pending: false, failed: accepted === false });
+            if (accepted === false || props.commitGlobal === undefined) return;
+            // The shipped global limit is derived from the depth that now
+            // applies, so switching depth keeps both pages consistent.
+            props.commitGlobal([
+              { op: 'set', path: ['maxActiveSubagents'], value: derivedLimit(option, ownLevel1, ownLevel2, ownValue) },
+            ]);
           })
           .catch(function () {
             setState({ pending: false, failed: true });
@@ -574,6 +608,41 @@ window.__ModuleLoader__.load({
     /** Coerce a settings value to the text an input shows. */
     function textOf(value) {
       return typeof value === 'string' ? value : value === undefined || value === null ? '' : String(value);
+    }
+
+    /**
+     * How many consultants this configuration can actually use. A consultant is
+     * only ever called while delegating, so it needs workers below it: the
+     * level-0 one needs level-1 workers, the level-1 one needs level-2 workers.
+     * @param depth - configured recursion depth (0, 1 or 2).
+     * @param level1 - level-1 worker cap.
+     * @param level2 - level-2 worker cap.
+     * @param value - the plugin entry's settings.
+     * @returns 0, 1 or 2.
+     */
+    function consultantCount(depth, level1, level2, value) {
+      if (value === null || value === undefined || value.consultantEnabled !== true) return 0;
+      var has0 = textOf(value.consultant0Provider) !== '' && textOf(value.consultant0Model) !== '';
+      var has1 = textOf(value.consultant1Provider) !== '' && textOf(value.consultant1Model) !== '';
+      var count = 0;
+      if (depth >= 1 && level1 > 0 && has0) count += 1;
+      if (depth >= 2 && level2 > 0 && has1) count += 1;
+      return count;
+    }
+
+    /**
+     * The concurrent-agent ceiling implied by the settings: workers reachable at
+     * this depth plus the consultants that can advise them. The CEO is not one
+     * of these and is never counted.
+     * @param depth - configured recursion depth.
+     * @param level1 - level-1 worker cap.
+     * @param level2 - level-2 worker cap.
+     * @param value - the plugin entry's settings.
+     * @returns the derived `maxActiveSubagents` value.
+     */
+    function derivedLimit(depth, level1, level2, value) {
+      var workers = (depth >= 1 ? level1 : 0) + (depth >= 2 ? level2 : 0);
+      return workers + consultantCount(depth, level1, level2, value);
     }
 
     /** One integer input that commits on blur or Enter. */
@@ -862,6 +931,11 @@ window.__ModuleLoader__.load({
         depthSnapshot !== undefined && depthSnapshot !== null && depthSnapshot.status === 'ready' && depthSnapshot.value !== null && depthSnapshot.value !== undefined
           ? Number(depthSnapshot.value.maxActiveSubagents)
           : undefined;
+      var depthValue =
+        depthSnapshot !== undefined && depthSnapshot !== null && depthSnapshot.status === 'ready' && depthSnapshot.value !== null && depthSnapshot.value !== undefined
+          ? Number(depthSnapshot.value.maxDepth)
+          : undefined;
+      var depth = Number.isFinite(depthValue) ? depthValue : undefined;
 
       var commitOps = function (ops) {
         setState({ pending: true, failed: false });
@@ -877,15 +951,41 @@ window.__ModuleLoader__.load({
         );
       };
 
+      /** Merge one field into a copy of the settings, for the derived limit. */
+      var withField = function (field, next) {
+        var copy = {};
+        for (var key in value) if (Object.prototype.hasOwnProperty.call(value, key)) copy[key] = value[key];
+        copy[field] = next;
+        return copy;
+      };
+
+      /**
+       * Push the derived ceiling after a settings change made here. The built-in
+       * page's number is a projection of depth + levels + consultants; this is
+       * the only writer of it.
+       */
+      var syncGlobal = function (merged) {
+        if (depth === undefined) return;
+        props.commitGlobal([{ op: 'set', path: ['maxActiveSubagents'], value: derivedLimit(depth, safe1, safe2, merged) }]);
+      };
+
       var write = function (field, next) {
-        return commitOps([{ op: 'set', path: [field], value: next }]);
+        return commitOps([{ op: 'set', path: [field], value: next }]).then(function (accepted) {
+          if (accepted) syncGlobal(withField(field, next));
+          return accepted;
+        });
       };
 
       var chooseRoute = function (prefix, provider, model) {
+        var merged = withField(prefix + 'Provider', provider);
+        merged[prefix + 'Model'] = model;
         return commitOps([
           { op: 'set', path: [prefix + 'Provider'], value: provider },
           { op: 'set', path: [prefix + 'Model'], value: model },
-        ]);
+        ]).then(function (accepted) {
+          if (accepted) syncGlobal(merged);
+          return accepted;
+        });
       };
 
       if (props.view === 'summary') {
@@ -931,19 +1031,52 @@ window.__ModuleLoader__.load({
       var safe1 = Number.isFinite(level1) ? level1 : 0;
       var safe2 = Number.isFinite(level2) ? level2 : 0;
       var sum = safe1 + safe2;
+      var consultants = depth === undefined ? 0 : consultantCount(depth, safe1, safe2, value);
+      var target = depth === undefined ? undefined : derivedLimit(depth, safe1, safe2, value);
 
       /**
-       * Change one level and keep the shipped global limit equal to the sum, so
-       * the two pages cannot disagree about how many subagents may run at once.
+       * Change one level and keep the shipped global limit equal to the derived
+       * ceiling (workers at this depth plus the consultants that can advise them).
        */
       var commitLevel = function (field, next) {
         var next1 = field === 'level1' ? next : safe1;
         var next2 = field === 'level2' ? next : safe2;
         commitOps([{ op: 'set', path: [field], value: next }]).then(function (accepted) {
-          if (!accepted) return;
-          props.commitGlobal([{ op: 'set', path: ['maxActiveSubagents'], value: next1 + next2 }]);
+          if (!accepted || depth === undefined) return;
+          var merged = withField(field, next);
+          props.commitGlobal([{ op: 'set', path: ['maxActiveSubagents'], value: derivedLimit(depth, next1, next2, merged) }]);
         });
       };
+
+      /**
+       * Reconcile the shipped global limit with the table and the depth. A lower
+       * global is honoured by shrinking level 2 first, then level 1; a higher one
+       * is simply lowered to the derived ceiling.
+       */
+      var recalcQuota = function () {
+        if (depth === undefined || !Number.isFinite(globalLimit)) return;
+        var l1 = safe1;
+        var l2 = safe2;
+        for (var guard = 0; guard < 64; guard += 1) {
+          if (derivedLimit(depth, l1, l2, value) <= globalLimit) break;
+          if (l2 > 0) l2 -= 1;
+          else if (l1 > 0) l1 -= 1;
+          else break;
+        }
+        var ops = [];
+        if (l1 !== safe1) ops.push({ op: 'set', path: ['level1'], value: l1 });
+        if (l2 !== safe2) ops.push({ op: 'set', path: ['level2'], value: l2 });
+        var merged = withField('level1', l1);
+        merged.level2 = l2;
+        var nextTarget = derivedLimit(depth, l1, l2, merged);
+        var finish = function () {
+          if (nextTarget !== globalLimit) props.commitGlobal([{ op: 'set', path: ['maxActiveSubagents'], value: nextTarget }]);
+        };
+        if (ops.length === 0) finish();
+        else commitOps(ops).then(function (accepted) { if (accepted) finish(); });
+      };
+
+      var mismatch = Number.isFinite(globalLimit) && target !== undefined && globalLimit !== target;
 
       var quota = h(
         'section',
@@ -986,15 +1119,37 @@ window.__ModuleLoader__.load({
             h('span', { className: 'sudg-quotaLabel' }, t('quotaGlobal')),
             h(
               'span',
-              { className: 'sudg-quotaFixed', 'data-mismatch': Number.isFinite(globalLimit) && globalLimit !== sum ? 'true' : undefined },
-              (Number.isFinite(globalLimit) ? String(globalLimit) : '—') + ' / ' + sum,
+              { className: 'sudg-quotaFixed', 'data-mismatch': mismatch ? 'true' : undefined },
+              (Number.isFinite(globalLimit) ? String(globalLimit) : '—') + ' / ' + (target === undefined ? '—' : String(target)),
             ),
           ),
+          mismatch
+            ? h(
+                'div',
+                { className: 'sudg-quotaRow' },
+                h('span', { className: 'sudg-quotaLabel' }, t('quotaMismatch')),
+                h('button', { type: 'button', className: 'sudg-mode', onClick: recalcQuota }, t('quotaRecalc')),
+              )
+            : null,
         ),
         h(
           'p',
           { className: 'sudg-cfgHint' },
-          t('quotaTotalPrefix') + ' ' + safe1 + ' + ' + safe2 + ' = ' + sum + ' ' + t('quotaTotalSuffix') + ' ' + t('quotaWithCeo') + ' ' + (sum + 1) + ' ' + t('quotaRoles') + ' ' + t('quotaConsultantNote'),
+          t('quotaTotalPrefix') +
+            ' ' +
+            (depth === undefined ? '—' : String(safe1 + (depth >= 2 ? safe2 : 0))) +
+            ' ' +
+            t('quotaWorkers') +
+            ' + ' +
+            String(consultants) +
+            ' ' +
+            t('quotaConsultants') +
+            ' = ' +
+            (target === undefined ? '—' : String(target)) +
+            ' ' +
+            t('quotaTotalSuffix') +
+            ' ' +
+            t('quotaConsultantNote'),
         ),
       );
 
@@ -1159,6 +1314,9 @@ window.__ModuleLoader__.load({
           ownForm: ownForm,
           t: t,
           commit: function (ops) {
+            return commit(NAMESPACE, ops);
+          },
+          commitGlobal: function (ops) {
             return commit(NAMESPACE, ops);
           },
           commitOwn: function (ops) {
