@@ -9,9 +9,14 @@
 
 ![输入栏里的样子](docs/idle.png)
 
-点击 chip，菜单**向上**弹出，和这一排其它控件一致：行有 hover 高亮、当前档带勾、指针变手型；悬停 chip 本身还会显示系统原生 tooltip（当前档）：
+点击 chip，菜单**向上**弹出。每一档带一个层级图标（⊘ / 两节点 / 三节点），行有 hover 高亮、当前档带勾、指针变手型：
 
 ![菜单](docs/hover.png)
+
+尺寸与配色不是估的，是从这两个已发布包里的 CSS 抄的：
+
+- `@deepseek-ai/dsh-client-ui-permission-presets` → `PermissionSelect.module.css`（chip 的 `height:28px`、`padding:0 4px 0 8px`、`font-size:13px; font-weight:500; line-height:20px`、`color:var(--dsw-alias-label-secondary)`、hover `var(--dsw-alias-interactive-bg-hover)`）
+- `@deepseek-ai/dsh-client-ui-primitives` → `Menu.module.css` + `MenuSurface.module.css`（菜单卡片的 `--dsw-menu-surface-fill`、`--dsw-elevation-prominent`、行高 `min-height:34px`）
 
 ## 三档含义
 

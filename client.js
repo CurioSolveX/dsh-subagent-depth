@@ -1,26 +1,36 @@
 /**
- * Browser half of `dsh-subagent-depth` — the "tree depth" control.
+ * Browser half of `dsh-subagent-depth` — the "tree depth" chip.
  *
- * One compact chip in `conversation.input.left`, the left end of the composer
+ * One compact control in `conversation.input.left`, the left end of the composer
  * tool row, beside the permission and model controls. It shows the maximum
  * Subagent recursion depth and selects 0, 1, or 2 from a menu that opens above
- * it, the way every other chip in that row behaves.
+ * it.
  *
  * The value is an upper bound, not a command: the agent still decides per task
  * whether delegating is worthwhile. 0 disables Subagents entirely, 1 allows
  * only the main agent to create them, 2 lets a Subagent create one more level.
  *
+ * Geometry and colour are copied from the shipped permission chip in the same
+ * row (`@deepseek-ai/dsh-client-ui-permission-presets`, PermissionSelect.module
+ * .css) and from the shared menu primitive (`@deepseek-ai/dsh-client-ui-
+ * primitives`, Menu.module.css / MenuSurface.module.css), rather than guessed:
+ *
+ *   trigger  height 28px · radius var(--dsw-radius-sm) · padding 0 4px 0 8px
+ *            gap 4px · 13px / weight 500 / line-height 20px
+ *            colour var(--dsw-alias-label-secondary)
+ *            hover  var(--dsw-alias-interactive-bg-hover)
+ *            icon 14px · chevron var(--dsw-alias-label-caption)
+ *   menu     radius var(--dsw-radius-lg) · padding 4px · shadow
+ *            var(--dsw-elevation-prominent) · background
+ *            var(--dsw-menu-surface-fill) with its backdrop filter
+ *   row      min-height 34px · padding 6px 8px · gap 6px · radius
+ *            var(--dsw-radius-md) · 13px / line-height 20px ·
+ *            colour var(--dsw-alias-label-primary) · hover
+ *            var(--dsw-alias-interactive-bg-hover)
+ *
  * The control owns no state of its own: it reads and writes the shipped
  * `subagent` settings namespace through the client `configForms` service, the
- * same one the Settings page uses. That keeps one owner of `maxDepth`, so the
- * Settings page and this control can never disagree, and the Host still writes
- * the value into the profile patch through the normal Loader path.
- *
- * Three deliberate matches to the permission chip beside it:
- *   - a native `select` is not used; the OS dropdown it opens cannot be styled
- *     and would look nothing like the row's other menus;
- *   - the chip carries a chevron, hover background, and pointer cursor;
- *   - menu rows highlight on hover and the current level carries a tick.
+ * same one the Settings page uses.
  *
  * Nothing here may break the composer: registration, styling, and rendering are
  * each isolated, and a render failure unmounts only this control.
@@ -45,8 +55,6 @@ window.__ModuleLoader__.load({
     var SCHEMA_DEFAULT = 1;
     /** The depths offered by the menu, in display order. */
     var CHOICES = [0, 1, 2];
-    /** Menu width; wide enough for the longest level description. */
-    var MENU_WIDTH = 200;
 
     var en = {
       name: 'Tree depth',
@@ -68,38 +76,45 @@ window.__ModuleLoader__.load({
     };
 
     var CSS = [
-      '.sudg-root{display:inline-flex;align-items:center;gap:5px;height:28px;',
-      'padding:0 7px;border:0;border-radius:8px;background:transparent;',
-      'color:var(--dsw-alias-label-primary);font:inherit;font-size:13px;',
-      'line-height:1;white-space:nowrap;cursor:pointer;user-select:none;',
-      'outline:none;transition:background .12s ease;}',
-      // bg-layer-2 equals the composer surface (#2C2C2E), so hovering it changed
-      // nothing. The permission chip sits on #3D3D3E when hovered, which is what
-      // the shipped hover surface token resolves to.
-      '.sudg-root:hover,.sudg-root[data-open="true"]',
-      '{background:var(--dsw-alias-bg-layer-4,rgba(255,255,255,.075));}',
-      '.sudg-root:focus-visible{box-shadow:0 0 0 2px var(--dsw-alias-brand-primary);}',
-      '.sudg-root[data-failed="true"]{color:var(--dsw-alias-state-error-primary);}',
-      '.sudg-chevron{flex:none;opacity:.7;transition:transform .12s ease;}',
-      '.sudg-root[data-open="true"] .sudg-chevron{transform:rotate(180deg);}',
-      // Measured targets on this theme: the permission menu panel is #2E2F35,
-      // bg-overlay rendered #61666B (a translucent light wash) and bg-layer-1
-      // #232324 (too dark). bg-layer-2 lands on #2C2C2E, the closest surface.
-      '.sudg-menu{position:fixed;z-index:2147483000;box-sizing:border-box;',
-      'width:max-content;max-width:260px;padding:4px;border-radius:10px;',
-      'border:.5px solid var(--dsw-alias-border-l2);',
-      'background:var(--dsw-alias-bg-layer-2,#2C2C2E);',
-      'box-shadow:0 10px 26px rgba(0,0,0,.42);}',
-      '.sudg-item{display:flex;align-items:center;gap:6px;padding:5px 8px;',
-      'border-radius:6px;color:var(--dsw-alias-label-primary);font-size:13px;',
-      'line-height:1.2;white-space:nowrap;cursor:pointer;}',
-      '.sudg-item:hover,.sudg-item[data-active="true"]',
-      '{background:var(--dsw-alias-bg-layer-4,rgba(255,255,255,.075));}',
-      '.sudg-num{flex:none;width:9px;text-align:right;opacity:.55;',
-      'font-variant-numeric:tabular-nums;}',
-      '.sudg-label{flex:1 1 auto;}',
-      '.sudg-check{flex:none;margin-left:2px;opacity:0;}',
-      '.sudg-item[data-current="true"] .sudg-check{opacity:1;}',
+      /* Trigger — copied from PermissionSelect.module.css .trigger */
+      '.sudg-trigger{border-radius:var(--dsw-radius-sm);min-width:0;max-width:220px;',
+      'height:28px;color:var(--dsw-alias-label-secondary);cursor:pointer;',
+      'background:0 0;border:none;outline:none;align-items:center;gap:4px;',
+      'padding:0 4px 0 8px;font-size:13px;font-weight:500;line-height:20px;',
+      'display:inline-flex;}',
+      '.sudg-trigger:hover:not(:disabled)',
+      '{background:var(--dsw-alias-interactive-bg-hover);}',
+      '.sudg-trigger:focus-visible{box-shadow:0 0 0 2px var(--dsw-focus-ring-color,',
+      'var(--dsw-alias-state-business-primary));}',
+      '.sudg-trigger:disabled{color:var(--dsw-alias-label-dimmed);cursor:default;}',
+      '.sudg-triggerIcon{flex:none;display:inline-flex;}',
+      '.sudg-triggerIcon svg{width:14px;height:14px;}',
+      '.sudg-triggerLabel{text-overflow:ellipsis;white-space:nowrap;min-width:0;',
+      'overflow:hidden;}',
+      '.sudg-chevron{color:var(--dsw-alias-label-caption);flex:none;',
+      'transition:transform .12s;display:inline-flex;}',
+      '.sudg-chevronOpen{transform:rotate(180deg);}',
+      /* Menu card — copied from Menu.module.css .list + MenuSurface.module.css */
+      '.sudg-menu{position:fixed;z-index:1100;box-sizing:border-box;padding:4px;',
+      'display:flex;flex-direction:column;gap:0;border:0;',
+      'border-radius:var(--dsw-radius-lg);box-shadow:var(--dsw-elevation-prominent);',
+      'background:var(--dsw-menu-surface-fill);',
+      '-webkit-backdrop-filter:var(--dsw-menu-backdrop-filter);',
+      'backdrop-filter:var(--dsw-menu-backdrop-filter);',
+      'min-width:144px;max-width:360px;}',
+      /* Row — copied from Menu.module.css .item */
+      '.sudg-item{display:flex;align-items:center;gap:6px;width:100%;min-height:34px;',
+      'padding:6px 8px;border:none;border-radius:var(--dsw-radius-md);',
+      'background:transparent;cursor:pointer;font-size:13px;line-height:20px;',
+      'color:var(--dsw-alias-label-primary);text-align:left;font-family:inherit;}',
+      '.sudg-item:hover:not(:disabled),.sudg-item:focus-visible:not(:disabled)',
+      '{background:var(--dsw-alias-interactive-bg-hover);outline:none;}',
+      '.sudg-itemIcon{display:inline-flex;flex:none;width:14px;height:14px;',
+      'align-items:center;justify-content:center;color:var(--dsw-alias-menu-icon);}',
+      '.sudg-itemIcon svg{width:14px;height:14px;}',
+      '.sudg-itemLabel{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;',
+      'white-space:nowrap;}',
+      '.sudg-check{flex:none;width:14px;height:14px;color:var(--dsw-alias-label-primary);}',
     ].join('');
 
     /**
@@ -130,19 +145,67 @@ window.__ModuleLoader__.load({
       return '';
     }
 
-    /** Small downward chevron marking that this chip opens a menu. */
-    function Chevron() {
+    var STROKE = {
+      fill: 'none',
+      stroke: 'currentColor',
+      strokeWidth: 1.2,
+      strokeLinecap: 'round',
+      strokeLinejoin: 'round',
+    };
+
+    /**
+     * One 14px glyph per depth: a lone root for 0 (with a slash), a root with
+     * one child for 1, a root with two children for 2. These mark what the
+     * level means, the way the permission rows carry a shield per preset.
+     * @param depth - level to draw, or undefined for a value outside the set.
+     */
+    function DepthGlyph(depth) {
+      var children;
+      if (depth === 0) {
+        children = [
+          h('circle', { key: 'n', cx: 7, cy: 7, r: 3 }),
+          h('path', { key: 's', d: 'M4.2 9.8 L9.8 4.2' }),
+        ];
+      } else if (depth === 1) {
+        children = [
+          h('circle', { key: 'a', cx: 7, cy: 3.1, r: 2 }),
+          h('path', { key: 'e', d: 'M7 5.1 V 8.9' }),
+          h('circle', { key: 'b', cx: 7, cy: 10.9, r: 2 }),
+        ];
+      } else {
+        children = [
+          h('circle', { key: 'a', cx: 7, cy: 2.9, r: 1.9 }),
+          h('path', { key: 'e', d: 'M7 4.8 V 6.4 M4 6.4 H 10 M4 6.4 V 8 M10 6.4 V 8' }),
+          h('circle', { key: 'b', cx: 4, cy: 9.7, r: 1.7 }),
+          h('circle', { key: 'c', cx: 10, cy: 9.7, r: 1.7 }),
+        ];
+      }
+      // Inherited by the shapes below: without these the circles default to a
+      // black fill and read as blobs at 14px.
       return h(
         'svg',
         {
-          className: 'sudg-chevron',
-          width: 10,
-          height: 10,
-          viewBox: '0 0 10 10',
+          viewBox: '0 0 14 14',
+          width: 14,
+          height: 14,
           'aria-hidden': 'true',
+          fill: 'none',
+          stroke: 'currentColor',
+          strokeWidth: 1.2,
+          strokeLinecap: 'round',
+          strokeLinejoin: 'round',
         },
+        children,
+      );
+    }
+
+    /** Chevron matching the primitive icon the permission chip uses. */
+    function Chevron() {
+      return h(
+        'svg',
+        { viewBox: '0 0 14 14', width: 14, height: 14, 'aria-hidden': 'true' },
         h('path', {
-          d: 'M2 3.5 L5 6.5 L8 3.5',
+          d: 'M4 5.75 L7 8.75 L10 5.75',
           fill: 'none',
           stroke: 'currentColor',
           strokeWidth: 1.3,
@@ -152,16 +215,16 @@ window.__ModuleLoader__.load({
       );
     }
 
-    /** Check mark marking the current level inside the menu. */
+    /** Trailing check drawn on the selected row. */
     function Check() {
       return h(
         'svg',
-        { className: 'sudg-check', width: 12, height: 12, viewBox: '0 0 12 12', 'aria-hidden': 'true' },
+        { className: 'sudg-check', viewBox: '0 0 14 14', 'aria-hidden': 'true' },
         h('path', {
-          d: 'M2.5 6.2 L4.9 8.6 L9.5 3.6',
+          d: 'M3 7.3 L5.8 10 L11 4.6',
           fill: 'none',
           stroke: 'currentColor',
-          strokeWidth: 1.5,
+          strokeWidth: 1.4,
           strokeLinecap: 'round',
           strokeLinejoin: 'round',
         }),
@@ -198,7 +261,6 @@ window.__ModuleLoader__.load({
       var root = react.useRef(null);
       var open = menuBox !== null;
 
-      // Close on any press outside the control, and on Escape.
       react.useEffect(
         function () {
           if (!open) return undefined;
@@ -225,6 +287,7 @@ window.__ModuleLoader__.load({
       var depth = resolvedDepth(snapshot);
       var disabled = snapshot.writable === false || state.pending;
       var options = CHOICES.indexOf(depth) === -1 ? [depth].concat(CHOICES) : CHOICES;
+      var meaning = levelText(t, depth);
 
       var toggle = function () {
         if (disabled) return;
@@ -236,9 +299,12 @@ window.__ModuleLoader__.load({
         if (node === null || typeof node.getBoundingClientRect !== 'function') return;
         var rect = node.getBoundingClientRect();
         var viewWidth = window.innerWidth || 1024;
-        var left = Math.max(8, Math.min(rect.left, viewWidth - MENU_WIDTH - 8));
-        // The menu opens upward, like every other menu in this row.
-        setMenuBox({ left: left, bottom: (window.innerHeight || 768) - rect.top + 6 });
+        var viewHeight = window.innerHeight || 768;
+        // `side: "top"` in the Menu primitive: above the anchor, 4px clear.
+        setMenuBox({
+          left: Math.max(8, Math.min(rect.left, viewWidth - 160)),
+          bottom: Math.max(8, viewHeight - rect.top + 4),
+        });
       };
 
       var choose = function (option) {
@@ -257,65 +323,55 @@ window.__ModuleLoader__.load({
           });
       };
 
-      var chip = h(
-        'div',
+      var trigger = h(
+        'button',
         {
           ref: root,
-          className: 'sudg-root',
-          role: 'button',
-          tabIndex: 0,
-          'data-open': open ? 'true' : 'false',
-          'data-failed': state.failed ? 'true' : 'false',
+          type: 'button',
+          className: 'sudg-trigger',
           'aria-haspopup': 'menu',
           'aria-expanded': open ? 'true' : 'false',
-          'aria-label': t('title') + ': ' + depth,
-          title: t('title') + ' · ' + depth + ' ' + levelText(t, depth),
+          'aria-label': t('title') + ': ' + depth + (meaning === '' ? '' : ' ' + meaning),
+          title: t('title') + ' · ' + depth + (meaning === '' ? '' : ' ' + meaning),
+          disabled: disabled,
           onClick: toggle,
-          onKeyDown: function (event) {
-            if (event.key === 'Enter' || event.key === ' ') {
-              event.preventDefault();
-              toggle();
-            }
-          },
         },
-        h('span', null, state.failed ? t('failed') : state.pending ? t('busy') : t('name')),
-        h('span', { className: 'sudg-num', style: { width: 'auto', opacity: 1 } }, String(depth)),
-        h(Chevron),
+        h('span', { className: 'sudg-triggerIcon', 'aria-hidden': 'true' }, DepthGlyph(depth)),
+        h('span', { className: 'sudg-triggerLabel' }, state.failed ? t('failed') : state.pending ? t('busy') : t('name') + ' ' + depth),
+        h('span', { className: open ? 'sudg-chevron sudg-chevronOpen' : 'sudg-chevron', 'aria-hidden': 'true' }, Chevron()),
       );
 
-      if (!open) return chip;
+      if (!open) return trigger;
 
       var menu = h(
         'div',
         {
           className: 'sudg-menu',
           role: 'menu',
-          style: {
-            left: menuBox.left + 'px',
-            bottom: menuBox.bottom + 'px',
-          },
+          style: { left: menuBox.left + 'px', bottom: menuBox.bottom + 'px' },
         },
         options.map(function (option) {
+          var current = option === depth;
           return h(
-            'div',
+            'button',
             {
               key: String(option),
+              type: 'button',
               className: 'sudg-item',
               role: 'menuitemradio',
-              'aria-checked': option === depth ? 'true' : 'false',
-              'data-current': option === depth ? 'true' : 'false',
+              'aria-checked': current ? 'true' : 'false',
               onClick: function () {
                 choose(option);
               },
             },
-            h('span', { className: 'sudg-num' }, String(option)),
-            h('span', { className: 'sudg-label' }, levelText(t, option) || String(option)),
-            h(Check),
+            h('span', { className: 'sudg-itemIcon', 'aria-hidden': 'true' }, DepthGlyph(option)),
+            h('span', { className: 'sudg-itemLabel' }, levelText(t, option) || String(option)),
+            current ? h(Check) : null,
           );
         }),
       );
 
-      return h(react.Fragment, null, chip, menu);
+      return h(react.Fragment, null, trigger, menu);
     }
 
     /**
