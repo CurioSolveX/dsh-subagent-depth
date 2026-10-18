@@ -93,6 +93,7 @@ window.__ModuleLoader__.load({
       consultantOn: 'On',
       consultantOff: 'Off',
       consultantUnset: 'Not set',
+      consultantEditInPlugin: 'Edit in Plugins → Tree depth',
     };
     var zh = {
       name: '树深阈',
@@ -127,6 +128,7 @@ window.__ModuleLoader__.load({
       consultantOn: '开',
       consultantOff: '关',
       consultantUnset: '未设置',
+      consultantEditInPlugin: '在「插件 → 树深阈」里修改',
     };
 
     var CSS = [
@@ -246,6 +248,8 @@ window.__ModuleLoader__.load({
       '.sudg-itemArrow{flex:none;color:var(--dsw-alias-label-caption);',
       'display:inline-flex;transform:rotate(-90deg);}',
       '.sudg-itemArrow svg{width:12px;height:12px;}',
+      '.sudg-statusRow{display:flex;align-items:center;gap:8px;padding:6px 8px;',
+      'font-size:13px;line-height:20px;color:var(--dsw-alias-label-secondary);}',
     ].join('');
 
     /**
@@ -402,14 +406,6 @@ window.__ModuleLoader__.load({
       }, [ownForm]);
       var ownSnapshot = react.useSyncExternalStore(ownSubscribe, ownRead);
 
-      var viewState = react.useState('depth');
-      var view = viewState[0];
-      var setView = viewState[1];
-
-      var catalogState = react.useState({ status: 'idle', groups: [], error: null });
-      var catalog = catalogState[0];
-      var setCatalog = catalogState[1];
-
       var write = react.useState({ pending: false, failed: false });
       var state = write[0];
       var setState = write[1];
@@ -463,7 +459,6 @@ window.__ModuleLoader__.load({
         var rect = node.getBoundingClientRect();
         var viewWidth = window.innerWidth || 1024;
         var viewHeight = window.innerHeight || 768;
-        setView('depth');
         // `side: "top"` in the Menu primitive: above the anchor, 4px clear.
         setMenuBox({
           left: Math.max(8, Math.min(rect.left, viewWidth - 160)),
@@ -496,30 +491,6 @@ window.__ModuleLoader__.load({
         var routeModel = textOf(consultant['consultant' + index + 'Model']);
         return routeProvider !== '' && routeModel !== '' ? routeProvider + '/' + routeModel : '';
       };
-      var writeOwn = function (ops) {
-        return Promise.resolve(props.commitOwn(ops)).catch(function () {
-          return false;
-        });
-      };
-      var openModel = function (which) {
-        setView(which);
-        setCatalog({ status: 'loading', groups: [], error: null });
-        props.loadCatalog().then(
-          function (value) {
-            setCatalog({ status: 'ready', groups: value !== null && value !== undefined && Array.isArray(value.groups) ? value.groups : [], error: null });
-          },
-          function (error) {
-            setCatalog({ status: 'error', groups: [], error: String(error && error.message ? error.message : error) });
-          },
-        );
-      };
-      var pickModel = function (index, item) {
-        writeOwn([
-          { op: 'set', path: ['consultant' + index + 'Provider'], value: item.provider },
-          { op: 'set', path: ['consultant' + index + 'Model'], value: item.model },
-        ]);
-        setView('depth');
-      };
 
       var trigger = h(
         'button',
@@ -541,107 +512,44 @@ window.__ModuleLoader__.load({
 
       if (!open) return trigger;
 
-      var rows = [];
-      if (view === 'depth') {
-        rows = options.map(function (option) {
-          var current = option === depth;
-          return h(
-            'button',
-            {
-              key: String(option),
-              type: 'button',
-              className: 'sudg-item',
-              role: 'menuitemradio',
-              'aria-checked': current ? 'true' : 'false',
-              onClick: function () {
-                choose(option);
-              },
+      var rows = options.map(function (option) {
+        var current = option === depth;
+        return h(
+          'button',
+          {
+            key: String(option),
+            type: 'button',
+            className: 'sudg-item',
+            role: 'menuitemradio',
+            'aria-checked': current ? 'true' : 'false',
+            onClick: function () {
+              choose(option);
             },
-            h('span', { className: 'sudg-itemIcon', 'aria-hidden': 'true' }, DepthGlyph(option)),
-            h('span', { className: 'sudg-itemLabel' }, levelText(t, option) || String(option)),
-            current ? h(Check) : null,
-          );
-        });
-        rows.push(h('div', { key: 'sep', className: 'sudg-sep' }));
-        rows.push(h('div', { key: 'consultantTitle', className: 'sudg-menuTitle' }, t('consultantTitle')));
-        rows.push(
-          h(
-            'button',
-            {
-              key: 'consultantEnabled',
-              type: 'button',
-              className: 'sudg-item',
-              role: 'switch',
-              'aria-checked': consultantEnabled ? 'true' : 'false',
-              onClick: function () {
-                writeOwn([{ op: 'set', path: ['consultantEnabled'], value: !consultantEnabled }]);
-              },
-            },
-            h('span', { className: 'sudg-itemLabel' }, t('consultantEnabled')),
-            h('span', { className: 'sudg-itemValue' }, consultantEnabled ? t('consultantOn') : t('consultantOff')),
-          ),
+          },
+          h('span', { className: 'sudg-itemIcon', 'aria-hidden': 'true' }, DepthGlyph(option)),
+          h('span', { className: 'sudg-itemLabel' }, levelText(t, option) || String(option)),
+          current ? h(Check) : null,
         );
-        var routeRow = function (index, key) {
-          return h(
-            'button',
-            {
-              key: key,
-              type: 'button',
-              className: 'sudg-item',
-              onClick: function () {
-                openModel(key);
-              },
-            },
-            h('span', { className: 'sudg-itemLabel' }, index === 0 ? t('consultantLevel0Short') : t('consultantLevel1Short')),
-            h('span', { className: 'sudg-itemValue' }, routeOf(index) || t('consultantUnset')),
-            h('span', { className: 'sudg-itemArrow' }, Chevron()),
-          );
-        };
-        rows.push(routeRow(0, 'model0'));
-        rows.push(routeRow(1, 'model1'));
-        rows.push(
-          h(
-            'button',
-            {
-              key: 'consultantMode',
-              type: 'button',
-              className: 'sudg-item',
-              onClick: function () {
-                writeOwn([{ op: 'set', path: ['consultantMode'], value: consultantMode === 'smart' ? 'always' : 'smart' }]);
-              },
-            },
-            h('span', { className: 'sudg-itemLabel' }, t('consultantMode')),
-            h('span', { className: 'sudg-itemValue' }, consultantMode === 'smart' ? t('consultantModeSmart') : t('consultantModeAlways')),
-          ),
+      });
+
+      // The consultant is configured on the plugin page; the composer menu only
+      // reports its current state, so a delegation is never steered from a
+      // cramped popover by accident.
+      var statusRow = function (key, label, value) {
+        return h(
+          'div',
+          { key: key, className: 'sudg-statusRow' },
+          h('span', { className: 'sudg-itemLabel' }, label),
+          h('span', { className: 'sudg-itemValue' }, value),
         );
-      } else {
-        var modelIndex = view === 'model0' ? 0 : 1;
-        rows.push(
-          h(
-            'button',
-            {
-              key: 'back',
-              type: 'button',
-              className: 'sudg-item',
-              onClick: function () {
-                setView('depth');
-              },
-            },
-            h('span', { className: 'sudg-itemLabel' }, '‹ ' + (modelIndex === 0 ? t('consultantLevel0Short') : t('consultantLevel1Short'))),
-          ),
-        );
-        rows = rows.concat(
-          modelRows({
-            t: t,
-            catalog: catalog,
-            query: '',
-            value: routeOf(modelIndex),
-            onPick: function (item) {
-              pickModel(modelIndex, item);
-            },
-          }),
-        );
-      }
+      };
+      rows.push(h('div', { key: 'sep', className: 'sudg-sep' }));
+      rows.push(h('div', { key: 'consultantTitle', className: 'sudg-menuTitle' }, t('consultantTitle')));
+      rows.push(statusRow('consultantEnabled', t('consultantEnabled'), consultantEnabled ? t('consultantOn') : t('consultantOff')));
+      rows.push(statusRow('consultant0', t('consultantLevel0Short'), routeOf(0) || t('consultantUnset')));
+      rows.push(statusRow('consultant1', t('consultantLevel1Short'), routeOf(1) || t('consultantUnset')));
+      rows.push(statusRow('consultantMode', t('consultantMode'), consultantMode === 'smart' ? t('consultantModeSmart') : t('consultantModeAlways')));
+      rows.push(h('div', { key: 'consultantHint', className: 'sudg-menuTitle' }, t('consultantEditInPlugin')));
 
       var menu = h(
         'div',
