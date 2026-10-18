@@ -30,8 +30,8 @@ import z from '@deepseek-ai/schemastery';
 /** Delegation tools whose calls create a Subagent. */
 const DELEGATION_TOOLS = new Set(['subagent', 'subagent_fork']);
 
-/** How many levels this plugin caps; deeper levels are left uncapped. */
-const CAPPED_LEVELS = 3;
+/** How many levels this plugin caps: depth stops at 2, so levels 1 and 2. */
+const CAPPED_LEVELS = 2;
 
 export const name = 'subagent-depth';
 
@@ -41,7 +41,6 @@ export const inject = ['tools', 'subagents', 'agents'];
 export const Config = z.object({
   level1: z.number().step(1).min(0).max(1000).default(5).volatile(),
   level2: z.number().step(1).min(0).max(1000).default(8).volatile(),
-  level3: z.number().step(1).min(0).max(1000).default(12).volatile(),
 });
 
 /**
