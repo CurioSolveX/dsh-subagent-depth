@@ -265,7 +265,6 @@ async function askModel(ctx, request) {
       model: request.model,
       system: request.system,
       messages: [{ role: 'user', content: [{ type: 'text', text: request.text }] }],
-      temperature: 0,
       ...(request.maxTokens === undefined ? {} : { maxTokens: request.maxTokens }),
       signal: request.signal,
     });
