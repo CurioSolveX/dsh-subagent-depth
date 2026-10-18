@@ -1,6 +1,6 @@
 {
   "name": "dsh-subagent-depth",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "Subagent recursion depth switch in the composer tool row",
   "type": "module",

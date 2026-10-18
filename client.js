@@ -15,8 +15,9 @@
  * Settings page and this control can never disagree, and the Host still writes
  * the value into the profile patch through the normal Loader path.
  *
- * Deliberately quiet: no border and no explanatory text until it is hovered, so
- * it reads as part of the tool row rather than a panel inside it.
+ * Typography matches the neighbouring permission chip: 13px, primary label
+ * colour, no border. The explanation appears below-right on hover, styled like
+ * a dropdown panel, and the select menu itself is the one that opens upward.
  *
  * Nothing here may break the composer: registration, styling, and rendering are
  * each isolated, and a render failure unmounts only this control.
@@ -42,12 +43,14 @@ window.__ModuleLoader__.load({
     /** The depths offered by the selector, in display order. */
     var CHOICES = [0, 1, 2];
     /** Hover delay before the explanation appears, in milliseconds. */
-    var HOVER_DELAY = 550;
+    var HOVER_DELAY = 500;
+    /** Panel width, matching the width of the shipped dropdown surfaces. */
+    var TIP_WIDTH = 216;
 
     var en = {
-      name: 'Subagent',
+      name: 'Tree depth',
       title: 'Maximum subagent depth',
-      hint: 'An upper bound, not an instruction: the agent still decides per task whether to delegate.',
+      hint: 'A ceiling, not an instruction: the agent still decides whether to delegate.',
       level0: 'Off',
       level1: 'Main agent only',
       level2: 'One level of children',
@@ -55,9 +58,9 @@ window.__ModuleLoader__.load({
       failed: 'Not saved',
     };
     var zh = {
-      name: '子代理',
+      name: '树深阈',
       title: '最大子代理深度',
-      hint: '这是上限而不是指令：派不派、派几层，仍由 Agent 按任务自己决定。',
+      hint: '上限而非指令：派不派、派几层，仍由 Agent 自己决定。',
       level0: '禁用子智能体',
       level1: '仅主 Agent 可派',
       level2: '可递归一层',
@@ -65,17 +68,18 @@ window.__ModuleLoader__.load({
       failed: '未保存',
     };
 
+    // Metrics measured from the neighbouring permission chip in the same row:
+    // 13px label, primary label colour, no border, 8px hover radius.
     var CSS = [
       '.sudg-root{position:relative;display:inline-flex;align-items:center;gap:4px;',
       'min-width:0;height:28px;padding:0 6px;border:0;border-radius:8px;',
-      'background:transparent;color:var(--dsw-alias-label-secondary);',
-      'font:inherit;font-size:12px;line-height:1;white-space:nowrap;}',
-      '.sudg-root:hover{background:var(--dsw-alias-bg-layer-2);',
-      'color:var(--dsw-alias-label-primary);}',
-      '.sudg-name{pointer-events:none;opacity:.85;}',
+      'background:transparent;color:var(--dsw-alias-label-primary);',
+      'font:inherit;font-size:13px;line-height:1;white-space:nowrap;}',
+      '.sudg-root:hover{background:var(--dsw-alias-bg-layer-2);}',
+      '.sudg-name{pointer-events:none;}',
       '.sudg-select{appearance:none;-webkit-appearance:none;background:transparent;',
       'border:0;border-radius:5px;padding:2px;cursor:pointer;outline:none;',
-      'color:inherit;font:inherit;font-size:12px;line-height:1;',
+      'color:inherit;font:inherit;font-size:13px;line-height:1;',
       'font-variant-numeric:tabular-nums;}',
       '.sudg-select:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);',
       'outline-offset:1px;}',
@@ -84,18 +88,21 @@ window.__ModuleLoader__.load({
       'color:var(--dsw-alias-label-primary);}',
       '.sudg-root[data-depth="2"] .sudg-select{color:var(--dsw-alias-brand-primary);}',
       '.sudg-root[data-failed="true"] .sudg-name{color:var(--dsw-alias-state-error-primary);}',
-      '.sudg-tip{position:fixed;z-index:2147483000;width:248px;box-sizing:border-box;',
-      'padding:10px 12px;border:.5px solid var(--dsw-alias-border-l2);border-radius:10px;',
+      '.sudg-tip{position:fixed;z-index:2147483000;box-sizing:border-box;',
+      'white-space:normal;padding:6px;border-radius:12px;',
+      'border:.5px solid var(--dsw-alias-border-l2);',
       'background:var(--dsw-alias-bg-overlay);color:var(--dsw-alias-label-primary);',
-      'box-shadow:0 8px 26px rgba(0,0,0,.38);font-size:12px;line-height:1.5;',
+      'box-shadow:0 10px 30px rgba(0,0,0,.42);font-size:13px;line-height:1.45;',
       'pointer-events:none;}',
-      '.sudg-tip-title{font-weight:500;margin-bottom:6px;}',
-      '.sudg-tip-row{display:flex;gap:8px;color:var(--dsw-alias-label-secondary);}',
-      '.sudg-tip-row[data-current="true"]{color:var(--dsw-alias-brand-primary);}',
-      '.sudg-tip-num{width:10px;text-align:right;font-variant-numeric:tabular-nums;flex:none;}',
-      '.sudg-tip-hint{margin-top:8px;padding-top:8px;',
+      '.sudg-tip-row{display:flex;align-items:center;gap:8px;padding:5px 8px;',
+      'border-radius:8px;color:var(--dsw-alias-label-primary);}',
+      '.sudg-tip-row[data-current="true"]{background:var(--dsw-alias-bg-layer-2);}',
+      '.sudg-tip-num{width:10px;flex:none;text-align:right;',
+      'font-variant-numeric:tabular-nums;opacity:.6;}',
+      '.sudg-tip-mark{margin-left:auto;flex:none;opacity:.9;}',
+      '.sudg-tip-hint{margin:4px 2px 2px;padding:8px 8px 4px;',
       'border-top:.5px solid var(--dsw-alias-border-l1);',
-      'color:var(--dsw-alias-label-tertiary);font-size:11px;}',
+      'color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:1.5;}',
     ].join('');
 
     /**
@@ -127,34 +134,43 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * The explanation card. Rendered fixed to the viewport so the composer's
-     * own overflow cannot clip it, and placed above the control because the
-     * composer is pinned to the bottom of the window.
+     * The explanation panel. Placed below-right of the control, fixed to the
+     * viewport so the composer's own overflow cannot clip it. The select menu
+     * is the surface that opens upward; this one never does.
      * @param props - anchor rectangle and copy.
      */
     function Tip(props) {
       var anchor = props.anchor;
-      var width = 248;
       var viewWidth = typeof window === 'undefined' ? 1024 : window.innerWidth || 1024;
       var viewHeight = typeof window === 'undefined' ? 768 : window.innerHeight || 768;
-      var left = Math.max(8, Math.min(anchor.left, viewWidth - width - 8));
-      var bottom = Math.max(8, viewHeight - anchor.top + 8);
+      // Anchored to the control's left edge so it expands to the lower right,
+      // dragged back inside the viewport when the control sits near the edge.
+      var left = Math.max(8, Math.min(anchor.left, viewWidth - TIP_WIDTH - 8));
+      var top = anchor.bottom + 8;
+      // If it cannot fit below, flip above rather than run off-screen.
+      var place = top;
+      if (top + 150 > viewHeight - 8) place = Math.max(8, anchor.top - 8 - 150);
       var rows = CHOICES.map(function (option) {
+        var current = option === props.depth;
         return h(
           'div',
           {
             key: String(option),
             className: 'sudg-tip-row',
-            'data-current': option === props.depth ? 'true' : 'false',
+            'data-current': current ? 'true' : 'false',
           },
           h('span', { className: 'sudg-tip-num' }, String(option)),
           h('span', null, levelText(props.t, option)),
+          current ? h('span', { className: 'sudg-tip-mark' }, '✓') : null,
         );
       });
       return h(
         'div',
-        { className: 'sudg-tip', role: 'tooltip', style: { left: left + 'px', bottom: bottom + 'px' } },
-        h('div', { className: 'sudg-tip-title' }, props.t('title')),
+        {
+          className: 'sudg-tip',
+          role: 'tooltip',
+          style: { left: left + 'px', top: place + 'px', width: TIP_WIDTH + 'px' },
+        },
         rows,
         h('div', { className: 'sudg-tip-hint' }, props.t('hint')),
       );
@@ -304,7 +320,7 @@ window.__ModuleLoader__.load({
         ctx.effect(function () {
           return ctx.locale.register(I18N, { zh: zh, en: en });
         }, 'subagent-depth: dictionaries');
-        ctx.effect(installStyles, 'dsh-subagent-depth: stylesheet');
+        ctx.effect(installStyles, 'subagent-depth: stylesheet');
 
         var form = ctx.configForms.get(NAMESPACE);
         var face = { form: form, t: t };
