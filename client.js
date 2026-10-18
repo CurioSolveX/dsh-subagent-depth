@@ -154,31 +154,38 @@ window.__ModuleLoader__.load({
     };
 
     /**
-     * One 14px glyph per depth: a lone root for 0 (with a slash), a root with
-     * one child for 1, a root with two children for 2. These mark what the
-     * level means, the way the permission rows carry a shield per preset.
+     * One 14px glyph per depth, drawn as the tree it describes: a lone node for
+     * 0 (nothing can branch), one fork for 1, and a fork whose arms fork again
+     * for 2.
      * @param depth - level to draw, or undefined for a value outside the set.
      */
     function DepthGlyph(depth) {
       var children;
       if (depth === 0) {
-        children = [
-          h('circle', { key: 'n', cx: 7, cy: 7, r: 3 }),
-          h('path', { key: 's', d: 'M4.2 9.8 L9.8 4.2' }),
-        ];
+        // One node and no branch at all: nothing may be delegated.
+        children = [h('circle', { key: 'n', cx: 7, cy: 7, r: 3 })];
       } else if (depth === 1) {
+        // The root plus exactly one fork.
         children = [
-          h('circle', { key: 'a', cx: 7, cy: 3.1, r: 2 }),
-          h('path', { key: 'e', d: 'M7 5.1 V 8.9' }),
-          h('circle', { key: 'b', cx: 7, cy: 10.9, r: 2 }),
+          h('circle', { key: 'r', cx: 7, cy: 2.7, r: 1.5 }),
+          h('path', { key: 's', d: 'M7 4.2 V 6.7' }),
+          h('path', { key: 'f', d: 'M4 10.7 L7 6.7 L10 10.7' }),
+          h('circle', { key: 'a', cx: 4, cy: 10.7, r: 1.5 }),
+          h('circle', { key: 'b', cx: 10, cy: 10.7, r: 1.5 }),
+        ];
+      } else if (depth === 2) {
+        // The same fork, with each arm forking once more.
+        children = [
+          h('circle', { key: 'r', cx: 7, cy: 2.1, r: 1.3 }),
+          h('path', { key: 's', d: 'M7 3.4 V 4.9' }),
+          h('path', { key: 'f', d: 'M4.6 8 L7 4.9 L9.4 8' }),
+          h('circle', { key: 'a', cx: 4.6, cy: 8, r: 1.1 }),
+          h('circle', { key: 'b', cx: 9.4, cy: 8, r: 1.1 }),
+          h('path', { key: 'l', d: 'M3.1 11.9 L4.6 8 M6.1 11.9 L4.6 8' }),
+          h('path', { key: 'm', d: 'M7.9 11.9 L9.4 8 M10.9 11.9 L9.4 8' }),
         ];
       } else {
-        children = [
-          h('circle', { key: 'a', cx: 7, cy: 2.9, r: 1.9 }),
-          h('path', { key: 'e', d: 'M7 4.8 V 6.4 M4 6.4 H 10 M4 6.4 V 8 M10 6.4 V 8' }),
-          h('circle', { key: 'b', cx: 4, cy: 9.7, r: 1.7 }),
-          h('circle', { key: 'c', cx: 10, cy: 9.7, r: 1.7 }),
-        ];
+        children = [h('circle', { key: 'n', cx: 7, cy: 7, r: 3 })];
       }
       // Inherited by the shapes below: without these the circles default to a
       // black fill and read as blobs at 14px.
