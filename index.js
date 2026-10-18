@@ -1088,6 +1088,24 @@ async function reviewDecision(ctx, config, exec, tree, level) {
  */
 function installGuard(ctx, config) {
   const blocked = new Map();
+  /**
+   * Slots promised to a caller but not yet visible as running children. Two
+   * delegations issued in the same message both reach pre-execute before either
+   * child is catalogued, so counting only live rows lets both through. A short
+   * reservation closes that window.
+   */
+  const reserved = new Map();
+  const RESERVE_MS = 4_000;
+  const liveReservations = (level) => {
+    const list = (reserved.get(level) ?? []).filter((at) => Date.now() - at < RESERVE_MS);
+    reserved.set(level, list);
+    return list.length;
+  };
+  const reserve = (level) => {
+    const list = reserved.get(level) ?? [];
+    list.push(Date.now());
+    reserved.set(level, list);
+  };
   return ctx.on('tools/pre-execute', async (exec, next) => {
     if (!DELEGATION_TOOLS.has(exec.name) && exec.name !== DELEGATE_TOOL) return next();
     const caller = exec.agent;
@@ -1113,7 +1131,10 @@ function installGuard(ctx, config) {
     // `delegate` without a plan starts nothing: it only collects advice.
     if (exec.name === DELEGATE_TOOL) {
       if (!Array.isArray(args.plan) || args.plan.length === 0) return next();
-      return (await reviewDecision(ctx, config, exec, tree, level)) ?? next();
+      const verdict = await reviewDecision(ctx, config, exec, tree, level);
+      if (verdict !== undefined) return verdict;
+      for (let index = 0; index < args.plan.length; index += 1) reserve(level);
+      return next();
     }
 
     // 1. Consultant first: a complex delegation is refused, not started.
@@ -1135,7 +1156,7 @@ function installGuard(ctx, config) {
     // 2. Width: cheap and deterministic, so it runs before the reviewer.
     const cap = capFor(config, level);
     if (cap !== undefined) {
-      const live = liveAt(tree.rows, level);
+      const live = liveAt(tree.rows, level) + liveReservations(level);
       if (live >= cap) {
         return {
           kind: 'ask',
@@ -1149,7 +1170,10 @@ function installGuard(ctx, config) {
     }
 
     // 3. Shape: a separate model judges the delegation itself.
-    return (await reviewDecision(ctx, config, exec, tree, level)) ?? next();
+    const verdict = await reviewDecision(ctx, config, exec, tree, level);
+    if (verdict !== undefined) return verdict;
+    if (cap !== undefined) reserve(level);
+    return next();
   });
 }
 
