@@ -95,9 +95,10 @@ window.__ModuleLoader__.load({
       consultantUnset: 'Not set',
       consultantEditInPlugin: 'Edit in Plugins → Tree depth',
       quotaTitle: 'Quota (live subagents per level)',
-      quotaLevel0: 'Level 0 · the main agent (CEO)',
-      quotaLevel1: 'Level 1 · started by the CEO',
-      quotaLevel2: 'Level 2 · started by level 1',
+      quotaLevel0: 'Level 0',
+      quotaLegend: 'Level 0 is the CEO (fixed at 1); level 1 is started by the CEO; level 2 is started by level 1.',
+      quotaLevel1: 'Level 1',
+      quotaLevel2: 'Level 2',
       quotaFixed: '1 (fixed)',
       quotaTotalPrefix: 'At most',
       quotaGlobal: 'Global limit / derived',
@@ -145,9 +146,10 @@ window.__ModuleLoader__.load({
       consultantUnset: '未设置',
       consultantEditInPlugin: '在「插件 → 树深阈」里修改',
       quotaTitle: '配额（每一层同时最多几个）',
-      quotaLevel0: '0 级 · 主 Agent（CEO）',
-      quotaLevel1: '1 级 · 主 Agent 直接派的',
-      quotaLevel2: '2 级 · 1 级再往下派的',
+      quotaLevel0: '0 级',
+      quotaLegend: '0 级是 CEO（固定 1 个）；1 级是主 Agent 直接派的；2 级是 1 级再往下派的。',
+      quotaLevel1: '1 级',
+      quotaLevel2: '2 级',
       quotaFixed: '1（固定）',
       quotaTotalPrefix: '同时最多',
       quotaGlobal: '内置全局上限 / 应为',
@@ -645,22 +647,41 @@ window.__ModuleLoader__.load({
       return workers + consultantCount(depth, level1, level2, value);
     }
 
-    /** One integer input that commits on blur or Enter. */
+    /**
+     * One integer input that commits while typing (debounced) and on blur, so
+     * the derived numbers below it never lag behind the field being edited.
+     */
     function NumberField(props) {
       var draft = react.useState(String(props.value === undefined || props.value === null ? '' : props.value));
       var value = draft[0];
       var setValue = draft[1];
+
       react.useEffect(
         function () {
           setValue(String(props.value === undefined || props.value === null ? '' : props.value));
         },
         [props.value],
       );
-      var commit = function () {
+
+      var publish = function () {
         var next = Number(value);
-        if (!Number.isFinite(next) || next < 0 || Math.floor(next) !== next) return;
+        if (value === '' || !Number.isFinite(next) || next < 0 || Math.floor(next) !== next) return;
         if (next !== props.value) props.commit(next);
       };
+
+      react.useEffect(
+        function () {
+          var next = Number(value);
+          if (value === '' || !Number.isFinite(next) || next < 0 || Math.floor(next) !== next) return undefined;
+          if (next === props.value) return undefined;
+          var timer = setTimeout(publish, 500);
+          return function () {
+            clearTimeout(timer);
+          };
+        },
+        [value],
+      );
+
       return h('input', {
         className: 'sudg-cfgInput sudg-quotaNum',
         type: 'number',
@@ -670,11 +691,11 @@ window.__ModuleLoader__.load({
         onChange: function (event) {
           setValue(event.target.value);
         },
-        onBlur: commit,
+        onBlur: publish,
         onKeyDown: function (event) {
           if (event.key === 'Enter') {
             event.preventDefault();
-            commit();
+            publish();
           }
         },
       });
@@ -1082,6 +1103,7 @@ window.__ModuleLoader__.load({
         'section',
         { className: 'sudg-cfg' },
         h('div', { className: 'sudg-cfgHead' }, h('span', { className: 'sudg-cfgTitle' }, t('quotaTitle'))),
+        h('p', { className: 'sudg-cfgHint' }, t('quotaLegend')),
         h(
           'div',
           { className: 'sudg-quota' },
