@@ -82,6 +82,12 @@ window.__ModuleLoader__.load({
         'The consultant only advises: the working agent still decides how many subagents to start, which model each uses, and what counts as acceptable. Leave a level blank to disable it. Fill routes that already exist in this DSH (Kimi, Claude, GPT, Gemini, GLM …).',
       consultantSaved: 'Saved',
       consultantDirty: 'Editing…',
+      consultantPick: 'Choose a model',
+      consultantClear: 'Clear',
+      consultantSearch: 'Search models…',
+      consultantLoading: 'Loading models…',
+      consultantEmpty: 'No model is configured on this DSH yet.',
+      consultantError: 'Could not load the model list',
     };
     var zh = {
       name: '树深阈',
@@ -105,6 +111,12 @@ window.__ModuleLoader__.load({
         '顾问只出主意：派几个人、每人用什么模型、验收标准，仍由做事的 Agent 自己决定。某级留空 = 这一级不启用。填的是这台 DSH 里已经配好的路由（Kimi、Claude、GPT、Gemini、GLM 都可以）。',
       consultantSaved: '已保存',
       consultantDirty: '编辑中…',
+      consultantPick: '选择模型',
+      consultantClear: '清除',
+      consultantSearch: '搜索模型…',
+      consultantLoading: '正在读取模型列表…',
+      consultantEmpty: '这台 DSH 还没有配置任何模型。',
+      consultantError: '读不到模型列表',
     };
 
     var CSS = [
@@ -188,6 +200,31 @@ window.__ModuleLoader__.load({
       '.sudg-cfgStatus[data-failed]{color:var(--dsw-alias-state-error-primary);}',
       '.sudg-cfgSummary{font-size:13px;line-height:20px;',
       'color:var(--dsw-alias-label-secondary);}',
+      /* Model picker popup — same card as the composer menu, plus a filter row. */
+      '.sudg-picker{max-height:320px;width:320px;overflow:hidden;display:flex;',
+      'flex-direction:column;gap:0;}',
+      '.sudg-pickerList{overflow-y:auto;min-height:0;display:flex;flex-direction:column;}',
+      '.sudg-pickerSearch{box-sizing:border-box;width:100%;height:30px;margin:0 0 4px;',
+      'border:.5px solid var(--dsw-alias-border-l1);border-radius:var(--dsw-radius-sm);',
+      'background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);',
+      'font:inherit;font-size:13px;padding:0 8px;outline:none;}',
+      '.sudg-pickerSearch:focus{box-shadow:0 0 0 2px var(--dsw-focus-ring-color,',
+      'var(--dsw-alias-state-business-primary));}',
+      '.sudg-pickerGroup{font-size:11px;line-height:18px;padding:6px 8px 2px;',
+      'color:var(--dsw-alias-label-tertiary);}',
+      '.sudg-pickerEmpty{font-size:12px;line-height:18px;padding:8px;',
+      'color:var(--dsw-alias-label-tertiary);}',
+      '.sudg-pickerBtn{text-align:left;cursor:pointer;display:flex;align-items:center;',
+      'justify-content:space-between;gap:8px;}',
+      '.sudg-pickerBtn:hover{background:var(--dsw-alias-interactive-bg-hover);}',
+      '.sudg-pickerValue{min-width:0;overflow:hidden;text-overflow:ellipsis;',
+      'white-space:nowrap;}',
+      '.sudg-pickerChevron{flex:none;color:var(--dsw-alias-label-caption);}',
+      '.sudg-pickerClear{margin:4px 0 0;padding:6px 8px;width:100%;border:none;',
+      'border-radius:var(--dsw-radius-md);background:transparent;cursor:pointer;',
+      'color:var(--dsw-alias-label-tertiary);font:inherit;font-size:12px;',
+      'text-align:left;}',
+      '.sudg-pickerClear:hover{background:var(--dsw-alias-interactive-bg-hover);}',
     ].join('');
 
     /**
@@ -391,16 +428,10 @@ window.__ModuleLoader__.load({
         setMenuBox(null);
         if (disabled || option === depth) return;
         setState({ pending: true, failed: false });
-        // A rejected write means the shared settings mirror was behind (a
-        // revision conflict); the controller reloads it on rejection, so one
-        // immediate retry succeeds instead of asking the user to click again.
-        var attempt = function (remaining) {
-          return form.set('maxDepth', option).then(function (accepted) {
-            if (accepted !== false) return true;
-            return remaining > 0 ? attempt(remaining - 1) : false;
-          });
-        };
-        attempt(1)
+        // Written without the revision fence: this control owns exactly one
+        // scalar, and a stale shared mirror used to make a click read as a
+        // silent "Not saved" instead of changing the depth.
+        Promise.resolve(props.commit([{ op: 'set', path: ['maxDepth'], value: option }]))
           .then(function (accepted) {
             setState({ pending: false, failed: accepted === false });
           })
@@ -483,49 +514,186 @@ window.__ModuleLoader__.load({
       return typeof value === 'string' ? value : value === undefined || value === null ? '' : String(value);
     }
 
-    /** One labelled text input that commits on blur or Enter. */
-    function TextField(props) {
-      var draft = react.useState(textOf(props.value));
-      var value = draft[0];
-      var setValue = draft[1];
+    /**
+     * A model picker fed by the same Host catalog the composer's model menu
+     * uses, so it shows exactly the providers and models this DSH has
+     * configured (add a provider and it appears; remove it and it is gone).
+     * @param props - label, current `provider/model`, loader, choose, optional clear.
+     */
+    function ModelPicker(props) {
+      var t = props.t;
+      var openState = react.useState(false);
+      var open = openState[0];
+      var setOpen = openState[1];
+      var catalogState = react.useState({ status: 'idle', groups: [], error: null });
+      var catalog = catalogState[0];
+      var setCatalog = catalogState[1];
+      var queryState = react.useState('');
+      var query = queryState[0];
+      var setQuery = queryState[1];
+      var boxState = react.useState(null);
+      var box = boxState[0];
+      var setBox = boxState[1];
+      var root = react.useRef(null);
+
       react.useEffect(
         function () {
-          setValue(textOf(props.value));
+          if (!open) return undefined;
+          var onDown = function (event) {
+            var node = root.current;
+            if (node !== null && node.contains(event.target)) return;
+            setOpen(false);
+          };
+          var onKey = function (event) {
+            if (event.key === 'Escape') setOpen(false);
+          };
+          document.addEventListener('mousedown', onDown, true);
+          document.addEventListener('keydown', onKey, true);
+          return function () {
+            document.removeEventListener('mousedown', onDown, true);
+            document.removeEventListener('keydown', onKey, true);
+          };
         },
-        [props.value],
+        [open],
       );
-      var commit = function () {
-        if (value !== textOf(props.value)) props.commit(value);
+
+      var toggle = function () {
+        if (open) {
+          setOpen(false);
+          return;
+        }
+        var node = root.current;
+        if (node === null || typeof node.getBoundingClientRect !== 'function') return;
+        var rect = node.getBoundingClientRect();
+        var viewWidth = window.innerWidth || 1024;
+        var viewHeight = window.innerHeight || 768;
+        setBox({
+          left: Math.max(8, Math.min(rect.left, viewWidth - 330)),
+          top: Math.max(8, Math.min(rect.bottom + 4, viewHeight - 340)),
+        });
+        setOpen(true);
+        setQuery('');
+        setCatalog({ status: 'loading', groups: [], error: null });
+        props.load().then(
+          function (catalogValue) {
+            setCatalog({
+              status: 'ready',
+              groups: catalogValue !== null && catalogValue !== undefined && Array.isArray(catalogValue.groups) ? catalogValue.groups : [],
+              error: null,
+            });
+          },
+          function (error) {
+            setCatalog({ status: 'error', groups: [], error: String(error && error.message ? error.message : error) });
+          },
+        );
       };
+
+      var needle = query.trim().toLowerCase();
+      var visible = [];
+      for (var index = 0; index < catalog.groups.length; index += 1) {
+        var group = catalog.groups[index];
+        var models = Array.isArray(group.models) ? group.models : [];
+        var matched = [];
+        for (var m = 0; m < models.length; m += 1) {
+          var model = models[m];
+          var providerName = textOf(group.name) || textOf(group.id);
+          var modelName = textOf(model.name) || textOf(model.id);
+          var haystack = (providerName + ' ' + modelName + ' ' + textOf(group.id) + ' ' + textOf(model.id)).toLowerCase();
+          if (needle === '' || haystack.includes(needle)) {
+            matched.push({ provider: textOf(group.id), model: textOf(model.id), label: modelName });
+          }
+        }
+        if (matched.length > 0) visible.push({ providerLabel: providerName, models: matched });
+      }
+
+      var rows = [];
+      if (catalog.status === 'loading') rows.push(h('div', { key: 'loading', className: 'sudg-pickerEmpty' }, t('consultantLoading')));
+      else if (catalog.status === 'error') rows.push(h('div', { key: 'error', className: 'sudg-pickerEmpty' }, t('consultantError') + ' · ' + textOf(catalog.error)));
+      else if (visible.length === 0) rows.push(h('div', { key: 'empty', className: 'sudg-pickerEmpty' }, t('consultantEmpty')));
+      visible.forEach(function (entry) {
+        rows.push(h('div', { key: 'g:' + entry.providerLabel, className: 'sudg-pickerGroup' }, entry.providerLabel));
+        entry.models.forEach(function (item) {
+          var id = item.provider + '/' + item.model;
+          var current = id === textOf(props.value);
+          rows.push(
+            h(
+              'button',
+              {
+                key: id,
+                type: 'button',
+                className: 'sudg-item',
+                role: 'menuitemradio',
+                'aria-checked': current ? 'true' : 'false',
+                onClick: function () {
+                  setOpen(false);
+                  props.choose(item.provider, item.model);
+                },
+              },
+              h('span', { className: 'sudg-itemLabel' }, item.label),
+              current ? h(Check) : null,
+            ),
+          );
+        });
+      });
+      if (props.clear !== undefined) {
+        rows.push(
+          h(
+            'button',
+            {
+              key: 'clear',
+              type: 'button',
+              className: 'sudg-pickerClear',
+              onClick: function () {
+                setOpen(false);
+                props.clear();
+              },
+            },
+            t('consultantClear'),
+          ),
+        );
+      }
+
       return h(
-        'label',
-        { className: 'sudg-cfgField' },
+        'div',
+        { className: 'sudg-cfgField', ref: root },
         h('span', { className: 'sudg-cfgLabel' }, props.label),
-        h('input', {
-          className: 'sudg-cfgInput',
-          type: 'text',
-          value: value,
-          spellCheck: false,
-          placeholder: props.placeholder === undefined ? '' : props.placeholder,
-          onChange: function (event) {
-            setValue(event.target.value);
+        h(
+          'button',
+          {
+            type: 'button',
+            className: 'sudg-cfgInput sudg-pickerBtn',
+            onClick: toggle,
+            'aria-haspopup': 'listbox',
+            'aria-expanded': open ? 'true' : 'false',
           },
-          onBlur: commit,
-          onKeyDown: function (event) {
-            if (event.key === 'Enter') {
-              event.preventDefault();
-              commit();
-            }
-          },
-        }),
+          h('span', { className: 'sudg-pickerValue' }, textOf(props.value) === '' ? t('consultantPick') : textOf(props.value)),
+          h('span', { className: 'sudg-pickerChevron' }, Chevron()),
+        ),
+        open && box !== null
+          ? h(
+              'div',
+              { className: 'sudg-menu sudg-picker', role: 'listbox', style: { left: box.left + 'px', top: box.top + 'px' } },
+              h('input', {
+                className: 'sudg-pickerSearch',
+                type: 'search',
+                value: query,
+                placeholder: t('consultantSearch'),
+                onChange: function (event) {
+                  setQuery(event.target.value);
+                },
+              }),
+              h('div', { className: 'sudg-pickerList' }, rows),
+            )
+          : null,
       );
     }
+
 
     /**
      * The consultant form on this bundle's own page. It reads and writes this
      * plugin's `subagent-depth` entry through the same `configForms` service the
      * chip uses; nothing here touches the shipped Subagent page.
-     * @param props - `configForm`, `t`, and the owner's `view`.
+     * @param props - `configForm`, `t`, `commit`, `loadCatalog`, and the owner's `view`.
      */
     function ConsultantPanel(props) {
       var form = props.configForm;
@@ -551,15 +719,9 @@ window.__ModuleLoader__.load({
       var enabled = value.consultantEnabled === true;
       var mode = textOf(value.consultantMode) === 'always' ? 'always' : 'smart';
 
-      var write = function (field, next) {
+      var commitOps = function (ops) {
         setState({ pending: true, failed: false });
-        var attempt = function (remaining) {
-          return form.set(field, next).then(function (accepted) {
-            if (accepted !== false) return true;
-            return remaining > 0 ? attempt(remaining - 1) : false;
-          });
-        };
-        attempt(1).then(
+        return Promise.resolve(props.commit(ops)).then(
           function (accepted) {
             setState({ pending: false, failed: accepted === false });
           },
@@ -569,29 +731,35 @@ window.__ModuleLoader__.load({
         );
       };
 
+      var write = function (field, next) {
+        return commitOps([{ op: 'set', path: [field], value: next }]);
+      };
+
+      var chooseRoute = function (prefix, provider, model) {
+        return commitOps([
+          { op: 'set', path: [prefix + 'Provider'], value: provider },
+          { op: 'set', path: [prefix + 'Model'], value: model },
+        ]);
+      };
+
       if (props.view === 'summary') {
         return h('span', { className: 'sudg-cfgSummary' }, t('consultantTitle') + ' · ' + (enabled ? 'ON' : 'OFF'));
       }
 
       var level = function (index, title) {
+        var provider = textOf(value['consultant' + index + 'Provider']);
+        var model = textOf(value['consultant' + index + 'Model']);
         return h(
           'div',
           { className: 'sudg-cfgCard' },
           h('span', { className: 'sudg-cfgLabel' }, title),
-          h(TextField, {
-            label: t('consultantProvider'),
-            value: value['consultant' + index + 'Provider'],
-            placeholder: 'deepseek-account',
-            commit: function (next) {
-              write('consultant' + index + 'Provider', next);
-            },
-          }),
-          h(TextField, {
+          h(ModelPicker, {
+            t: t,
             label: t('consultantModel'),
-            value: value['consultant' + index + 'Model'],
-            placeholder: index === 0 ? 'deepseek-v4-pro' : 'deepseek-flash',
-            commit: function (next) {
-              write('consultant' + index + 'Model', next);
+            value: provider === '' || model === '' ? '' : provider + '/' + model,
+            load: props.loadCatalog,
+            choose: function (nextProvider, nextModel) {
+              chooseRoute('consultant' + index, nextProvider, nextModel);
             },
           }),
         );
@@ -649,21 +817,25 @@ window.__ModuleLoader__.load({
         ),
         h(
           'div',
-          { className: 'sudg-cfgGrid' },
-          h(TextField, {
-            label: t('consultantScreener') + ' · provider',
-            value: value.screenerProvider,
-            placeholder: '（留空 = 用主 Agent 自己的模型）',
-            commit: function (next) {
-              write('screenerProvider', next);
+          { className: 'sudg-cfgCard' },
+          h(
+            'span',
+            { className: 'sudg-cfgLabel' },
+            t('consultantScreener') + '（留空 = 用主 Agent 自己的模型）',
+          ),
+          h(ModelPicker, {
+            t: t,
+            label: t('consultantModel'),
+            value:
+              textOf(value.screenerProvider) === '' || textOf(value.screenerModel) === ''
+                ? ''
+                : textOf(value.screenerProvider) + '/' + textOf(value.screenerModel),
+            load: props.loadCatalog,
+            choose: function (nextProvider, nextModel) {
+              chooseRoute('screener', nextProvider, nextModel);
             },
-          }),
-          h(TextField, {
-            label: t('consultantScreener') + ' · model',
-            value: value.screenerModel,
-            placeholder: '',
-            commit: function (next) {
-              write('screenerModel', next);
+            clear: function () {
+              chooseRoute('screener', '', '');
             },
           }),
         ),
@@ -688,7 +860,7 @@ window.__ModuleLoader__.load({
       };
     }
 
-    exports.inject = ['slots', 'locale', 'configForms'];
+    exports.inject = ['slots', 'locale', 'configForms', 'remote', 'remote.session', 'remote.settings'];
     exports.apply = function apply(ctx) {
       try {
         var t = ctx.locale.bind(I18N);
@@ -698,7 +870,62 @@ window.__ModuleLoader__.load({
         ctx.effect(installStyles, 'dsh-subagent-depth: stylesheet');
 
         var form = ctx.configForms.get(NAMESPACE);
-        var face = { form: form, t: t };
+        var ownForm = ctx.configForms.get(OWN_NAMESPACE);
+
+        /**
+         * The Host's global model catalog — the same one the composer's model
+         * menu reads — so the pickers list exactly the providers and models
+         * configured in this DSH. Fetched per open, sharing one in-flight call.
+         */
+        var catalog = { inflight: null };
+        var loadCatalog = function () {
+          if (catalog.inflight !== null) return catalog.inflight;
+          var operation = Promise.resolve(ctx.remote.session.modelCatalog())
+            .then(function (response) {
+              if (response === undefined || response === null || response.ok === false) {
+                throw new Error(
+                  response && response.error
+                    ? textOf(response.error.code) + ': ' + textOf(response.error.message)
+                    : 'model catalog unavailable',
+                );
+              }
+              return response.value;
+            })
+            .finally(function () {
+              if (catalog.inflight === operation) catalog.inflight = null;
+            });
+          catalog.inflight = operation;
+          return operation;
+        };
+
+        /**
+         * Write fields without the revision fence: the chip is a single scalar
+         * owner, and a stale mirror used to turn a click into a silent
+         * "Not saved". Writes still fold back through settings/document-updated.
+         */
+        var commit = function (namespace, ops) {
+          var remote = ctx.remote && ctx.remote.settings;
+          if (remote && typeof remote.mutate === 'function') {
+            return Promise.resolve(remote.mutate(namespace, ops)).then(
+              function (result) {
+                return !(result && result.ok === false);
+              },
+              function () {
+                return false;
+              },
+            );
+          }
+          var target = namespace === NAMESPACE ? form : ownForm;
+          return target.mutate(ops);
+        };
+
+        var face = {
+          form: form,
+          t: t,
+          commit: function (ops) {
+            return commit(NAMESPACE, ops);
+          },
+        };
 
         ctx.effect(function () {
           return ctx.configForms.whileServed([NAMESPACE], function () {
@@ -726,8 +953,14 @@ window.__ModuleLoader__.load({
         // consultant fields can be edited. A failing page must not take the
         // composer control down with it, so this registration is isolated.
         try {
-          var ownForm = ctx.configForms.get(OWN_NAMESPACE);
-          var ownFace = { configForm: ownForm, t: t };
+          var ownFace = {
+            configForm: ownForm,
+            t: t,
+            commit: function (ops) {
+              return commit(OWN_NAMESPACE, ops);
+            },
+            loadCatalog: loadCatalog,
+          };
           ctx.effect(function () {
             return ctx.configForms.whileServed([OWN_NAMESPACE], function () {
               return ctx.slots.register(
