@@ -656,10 +656,14 @@ async function runDelegate(rootCtx, config, adviceOf, args, exec) {
 
   const answer = await askConsultant(rootCtx, config, parent, tree, callerDepth, need, task, exec.signal);
   if (answer === undefined) {
+    const route = consultantFor(config, callerDepth);
     return {
       kind: 'unavailable',
       message:
-        '意见专家暂时不可用（这一级没有配置模型，或调用失败）。这次不拦你：直接带 plan 调用一次，按你自己的判断派。',
+        (route === undefined
+          ? `第 ${callerDepth} 级没有配置意见专家。`
+          : `意见专家（${route.provider}/${route.model}）这次没有回应。`) +
+        '这次不拦你：直接带 plan 调用一次，按你自己的判断派。',
     };
   }
   rememberAdvice(adviceOf, parent.id, answer.advice);
@@ -874,7 +878,10 @@ function consultDefinition(rootCtx, config) {
     },
     output: {
       schema: CONSULT_OUTPUT,
-      render: (_args, value) => [{ type: 'text', text: String(value?.advice ?? '') }],
+      render: (_args, value) => {
+        const model = typeof value?.model === 'string' ? value.model : '';
+        return [{ type: 'text', text: (model === '' ? '' : `[顾问 ${model}]\n`) + String(value?.advice ?? '') }];
+      },
     },
     isConcurrencySafe: () => true,
     async execute(args, exec) {

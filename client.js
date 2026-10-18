@@ -94,6 +94,14 @@ window.__ModuleLoader__.load({
       consultantOff: 'Off',
       consultantUnset: 'Not set',
       consultantEditInPlugin: 'Edit in Plugins → Tree depth',
+      quotaTitle: 'Quota (live subagents per level)',
+      quotaLevel0: 'Level 0 · the main agent (CEO)',
+      quotaLevel1: 'Level 1 · started by the CEO',
+      quotaLevel2: 'Level 2 · started by level 1',
+      quotaFixed: '1 (fixed)',
+      quotaTotalPrefix: 'At most',
+      quotaTotalSuffix: 'working subagents (CEO included).',
+      quotaConsultantNote: 'Consultants do not take these slots: they sit beside the CEO as separate model calls.',
     };
     var zh = {
       name: '树深阈',
@@ -129,6 +137,14 @@ window.__ModuleLoader__.load({
       consultantOff: '关',
       consultantUnset: '未设置',
       consultantEditInPlugin: '在「插件 → 树深阈」里修改',
+      quotaTitle: '配额（每一层同时最多几个）',
+      quotaLevel0: '0 级 · 主 Agent（CEO）',
+      quotaLevel1: '1 级 · 主 Agent 直接派的',
+      quotaLevel2: '2 级 · 1 级再往下派的',
+      quotaFixed: '1（固定）',
+      quotaTotalPrefix: '同时最多',
+      quotaTotalSuffix: '个干活子代理（含 CEO）。',
+      quotaConsultantNote: '意见专家不占这些名额：它们和 CEO 同级，是单独的一次模型调用。',
     };
 
     var CSS = [
@@ -248,6 +264,14 @@ window.__ModuleLoader__.load({
       '.sudg-itemArrow{flex:none;color:var(--dsw-alias-label-caption);',
       'display:inline-flex;transform:rotate(-90deg);}',
       '.sudg-itemArrow svg{width:12px;height:12px;}',
+      '.sudg-quota{display:flex;flex-direction:column;gap:8px;}',
+      '.sudg-quotaRow{display:flex;align-items:center;justify-content:space-between;',
+      'gap:12px;padding:8px 12px;border-radius:var(--dsw-radius-md);',
+      'background:var(--dsw-alias-bg-module-platform);}',
+      '.sudg-quotaLabel{font-size:13px;line-height:20px;',
+      'color:var(--dsw-alias-label-secondary);}',
+      '.sudg-quotaFixed{font-size:13px;color:var(--dsw-alias-label-tertiary);}',
+      '.sudg-quotaNum{width:88px;flex:none;}',
       '.sudg-statusRow{display:flex;align-items:center;gap:8px;padding:6px 8px;',
       'font-size:13px;line-height:20px;color:var(--dsw-alias-label-secondary);}',
     ].join('');
@@ -392,20 +416,6 @@ window.__ModuleLoader__.load({
       }, [form]);
       var snapshot = react.useSyncExternalStore(subscribe, read);
 
-      // This plugin's own entry: the consultant routes live here, so the same
-      // chip can configure them without leaving the conversation.
-      var ownForm = props.ownForm;
-      var ownSubscribe = react.useCallback(
-        function (listener) {
-          return ownForm.subscribe(listener);
-        },
-        [ownForm],
-      );
-      var ownRead = react.useCallback(function () {
-        return ownForm.getSnapshot();
-      }, [ownForm]);
-      var ownSnapshot = react.useSyncExternalStore(ownSubscribe, ownRead);
-
       var write = react.useState({ pending: false, failed: false });
       var state = write[0];
       var setState = write[1];
@@ -482,16 +492,6 @@ window.__ModuleLoader__.load({
           });
       };
 
-      var consultant = ownSnapshot !== undefined && ownSnapshot !== null && ownSnapshot.status === 'ready' && ownSnapshot.value ? ownSnapshot.value : null;
-      var consultantEnabled = consultant !== null && consultant.consultantEnabled === true;
-      var consultantMode = consultant !== null && textOf(consultant.consultantMode) === 'always' ? 'always' : 'smart';
-      var routeOf = function (index) {
-        if (consultant === null) return '';
-        var routeProvider = textOf(consultant['consultant' + index + 'Provider']);
-        var routeModel = textOf(consultant['consultant' + index + 'Model']);
-        return routeProvider !== '' && routeModel !== '' ? routeProvider + '/' + routeModel : '';
-      };
-
       var trigger = h(
         'button',
         {
@@ -532,25 +532,6 @@ window.__ModuleLoader__.load({
         );
       });
 
-      // The consultant is configured on the plugin page; the composer menu only
-      // reports its current state, so a delegation is never steered from a
-      // cramped popover by accident.
-      var statusRow = function (key, label, value) {
-        return h(
-          'div',
-          { key: key, className: 'sudg-statusRow' },
-          h('span', { className: 'sudg-itemLabel' }, label),
-          h('span', { className: 'sudg-itemValue' }, value),
-        );
-      };
-      rows.push(h('div', { key: 'sep', className: 'sudg-sep' }));
-      rows.push(h('div', { key: 'consultantTitle', className: 'sudg-menuTitle' }, t('consultantTitle')));
-      rows.push(statusRow('consultantEnabled', t('consultantEnabled'), consultantEnabled ? t('consultantOn') : t('consultantOff')));
-      rows.push(statusRow('consultant0', t('consultantLevel0Short'), routeOf(0) || t('consultantUnset')));
-      rows.push(statusRow('consultant1', t('consultantLevel1Short'), routeOf(1) || t('consultantUnset')));
-      rows.push(statusRow('consultantMode', t('consultantMode'), consultantMode === 'smart' ? t('consultantModeSmart') : t('consultantModeAlways')));
-      rows.push(h('div', { key: 'consultantHint', className: 'sudg-menuTitle' }, t('consultantEditInPlugin')));
-
       var menu = h(
         'div',
         {
@@ -586,6 +567,41 @@ window.__ModuleLoader__.load({
     /** Coerce a settings value to the text an input shows. */
     function textOf(value) {
       return typeof value === 'string' ? value : value === undefined || value === null ? '' : String(value);
+    }
+
+    /** One integer input that commits on blur or Enter. */
+    function NumberField(props) {
+      var draft = react.useState(String(props.value === undefined || props.value === null ? '' : props.value));
+      var value = draft[0];
+      var setValue = draft[1];
+      react.useEffect(
+        function () {
+          setValue(String(props.value === undefined || props.value === null ? '' : props.value));
+        },
+        [props.value],
+      );
+      var commit = function () {
+        var next = Number(value);
+        if (!Number.isFinite(next) || next < 0 || Math.floor(next) !== next) return;
+        if (next !== props.value) props.commit(next);
+      };
+      return h('input', {
+        className: 'sudg-cfgInput sudg-quotaNum',
+        type: 'number',
+        min: 0,
+        step: 1,
+        value: value,
+        onChange: function (event) {
+          setValue(event.target.value);
+        },
+        onBlur: commit,
+        onKeyDown: function (event) {
+          if (event.key === 'Enter') {
+            event.preventDefault();
+            commit();
+          }
+        },
+      });
     }
 
     /**
@@ -882,7 +898,58 @@ window.__ModuleLoader__.load({
         );
       };
 
+      var level1 = value.level1 === undefined || value.level1 === null ? 5 : Number(value.level1);
+      var level2 = value.level2 === undefined || value.level2 === null ? 8 : Number(value.level2);
+      var safe1 = Number.isFinite(level1) ? level1 : 0;
+      var safe2 = Number.isFinite(level2) ? level2 : 0;
+      var quota = h(
+        'section',
+        { className: 'sudg-cfg' },
+        h('div', { className: 'sudg-cfgHead' }, h('span', { className: 'sudg-cfgTitle' }, t('quotaTitle'))),
+        h(
+          'div',
+          { className: 'sudg-quota' },
+          h(
+            'div',
+            { className: 'sudg-quotaRow' },
+            h('span', { className: 'sudg-quotaLabel' }, t('quotaLevel0')),
+            h('span', { className: 'sudg-quotaFixed' }, t('quotaFixed')),
+          ),
+          h(
+            'div',
+            { className: 'sudg-quotaRow' },
+            h('span', { className: 'sudg-quotaLabel' }, t('quotaLevel1')),
+            h(NumberField, {
+              value: safe1,
+              commit: function (next) {
+                commitOps([{ op: 'set', path: ['level1'], value: next }]);
+              },
+            }),
+          ),
+          h(
+            'div',
+            { className: 'sudg-quotaRow' },
+            h('span', { className: 'sudg-quotaLabel' }, t('quotaLevel2')),
+            h(NumberField, {
+              value: safe2,
+              commit: function (next) {
+                commitOps([{ op: 'set', path: ['level2'], value: next }]);
+              },
+            }),
+          ),
+        ),
+        h(
+          'p',
+          { className: 'sudg-cfgHint' },
+          t('quotaTotalPrefix') + ' 1 + ' + safe1 + ' + ' + safe2 + ' = ' + (1 + safe1 + safe2) + ' ' + t('quotaTotalSuffix') + ' ' + t('quotaConsultantNote'),
+        ),
+      );
+
       return h(
+        react.Fragment,
+        null,
+        quota,
+        h(
         'section',
         { className: 'sudg-cfg' },
         h(
@@ -922,6 +989,7 @@ window.__ModuleLoader__.load({
           'span',
           { className: 'sudg-cfgStatus', 'data-failed': state.failed ? 'true' : undefined },
           state.pending ? t('busy') : state.failed ? t('failed') : '',
+        ),
         ),
       );
     }
