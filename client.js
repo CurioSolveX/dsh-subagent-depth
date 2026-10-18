@@ -100,7 +100,10 @@ window.__ModuleLoader__.load({
       quotaLevel2: 'Level 2 · started by level 1',
       quotaFixed: '1 (fixed)',
       quotaTotalPrefix: 'At most',
-      quotaTotalSuffix: 'working subagents (CEO included).',
+      quotaGlobal: 'Global limit (auto-synced) / level sum',
+      quotaTotalSuffix: 'subagents;',
+      quotaWithCeo: 'with the CEO that is',
+      quotaRoles: 'roles.',
       quotaConsultantNote: 'Consultants do not take these slots: they sit beside the CEO as separate model calls.',
     };
     var zh = {
@@ -143,7 +146,10 @@ window.__ModuleLoader__.load({
       quotaLevel2: '2 级 · 1 级再往下派的',
       quotaFixed: '1（固定）',
       quotaTotalPrefix: '同时最多',
-      quotaTotalSuffix: '个干活子代理（含 CEO）。',
+      quotaGlobal: '内置全局上限（自动同步）/ 每层合计',
+      quotaTotalSuffix: '个子代理；',
+      quotaWithCeo: '加 CEO 共',
+      quotaRoles: '个角色。',
       quotaConsultantNote: '意见专家不占这些名额：它们和 CEO 同级，是单独的一次模型调用。',
     };
 
@@ -271,6 +277,7 @@ window.__ModuleLoader__.load({
       '.sudg-quotaLabel{font-size:13px;line-height:20px;',
       'color:var(--dsw-alias-label-secondary);}',
       '.sudg-quotaFixed{font-size:13px;color:var(--dsw-alias-label-tertiary);}',
+      '.sudg-quotaFixed[data-mismatch="true"]{color:var(--dsw-alias-state-error-primary);}',
       '.sudg-quotaNum{width:88px;flex:none;}',
       '.sudg-statusRow{display:flex;align-items:center;gap:8px;padding:6px 8px;',
       'font-size:13px;line-height:20px;color:var(--dsw-alias-label-secondary);}',
@@ -827,6 +834,21 @@ window.__ModuleLoader__.load({
       }, [form]);
       var snapshot = react.useSyncExternalStore(subscribe, read);
 
+      // The shipped `subagent` entry carries the global concurrent-subagent
+      // limit. It is shown here and kept equal to level1 + level2, so the two
+      // pages can never disagree about how many may run.
+      var depthForm = props.depthForm;
+      var depthSubscribe = react.useCallback(
+        function (listener) {
+          return depthForm.subscribe(listener);
+        },
+        [depthForm],
+      );
+      var depthRead = react.useCallback(function () {
+        return depthForm.getSnapshot();
+      }, [depthForm]);
+      var depthSnapshot = react.useSyncExternalStore(depthSubscribe, depthRead);
+
       var status = react.useState({ pending: false, failed: false });
       var state = status[0];
       var setState = status[1];
@@ -836,15 +858,21 @@ window.__ModuleLoader__.load({
       var value = snapshot.value === undefined || snapshot.value === null ? {} : snapshot.value;
       var enabled = value.consultantEnabled === true;
       var mode = textOf(value.consultantMode) === 'always' ? 'always' : 'smart';
+      var globalLimit =
+        depthSnapshot !== undefined && depthSnapshot !== null && depthSnapshot.status === 'ready' && depthSnapshot.value !== null && depthSnapshot.value !== undefined
+          ? Number(depthSnapshot.value.maxActiveSubagents)
+          : undefined;
 
       var commitOps = function (ops) {
         setState({ pending: true, failed: false });
         return Promise.resolve(props.commit(ops)).then(
           function (accepted) {
             setState({ pending: false, failed: accepted === false });
+            return accepted !== false;
           },
           function () {
             setState({ pending: false, failed: true });
+            return false;
           },
         );
       };
@@ -902,6 +930,21 @@ window.__ModuleLoader__.load({
       var level2 = value.level2 === undefined || value.level2 === null ? 8 : Number(value.level2);
       var safe1 = Number.isFinite(level1) ? level1 : 0;
       var safe2 = Number.isFinite(level2) ? level2 : 0;
+      var sum = safe1 + safe2;
+
+      /**
+       * Change one level and keep the shipped global limit equal to the sum, so
+       * the two pages cannot disagree about how many subagents may run at once.
+       */
+      var commitLevel = function (field, next) {
+        var next1 = field === 'level1' ? next : safe1;
+        var next2 = field === 'level2' ? next : safe2;
+        commitOps([{ op: 'set', path: [field], value: next }]).then(function (accepted) {
+          if (!accepted) return;
+          props.commitGlobal([{ op: 'set', path: ['maxActiveSubagents'], value: next1 + next2 }]);
+        });
+      };
+
       var quota = h(
         'section',
         { className: 'sudg-cfg' },
@@ -922,7 +965,7 @@ window.__ModuleLoader__.load({
             h(NumberField, {
               value: safe1,
               commit: function (next) {
-                commitOps([{ op: 'set', path: ['level1'], value: next }]);
+                commitLevel('level1', next);
               },
             }),
           ),
@@ -933,15 +976,25 @@ window.__ModuleLoader__.load({
             h(NumberField, {
               value: safe2,
               commit: function (next) {
-                commitOps([{ op: 'set', path: ['level2'], value: next }]);
+                commitLevel('level2', next);
               },
             }),
+          ),
+          h(
+            'div',
+            { className: 'sudg-quotaRow' },
+            h('span', { className: 'sudg-quotaLabel' }, t('quotaGlobal')),
+            h(
+              'span',
+              { className: 'sudg-quotaFixed', 'data-mismatch': Number.isFinite(globalLimit) && globalLimit !== sum ? 'true' : undefined },
+              (Number.isFinite(globalLimit) ? String(globalLimit) : '—') + ' / ' + sum,
+            ),
           ),
         ),
         h(
           'p',
           { className: 'sudg-cfgHint' },
-          t('quotaTotalPrefix') + ' 1 + ' + safe1 + ' + ' + safe2 + ' = ' + (1 + safe1 + safe2) + ' ' + t('quotaTotalSuffix') + ' ' + t('quotaConsultantNote'),
+          t('quotaTotalPrefix') + ' ' + safe1 + ' + ' + safe2 + ' = ' + sum + ' ' + t('quotaTotalSuffix') + ' ' + t('quotaWithCeo') + ' ' + (sum + 1) + ' ' + t('quotaRoles') + ' ' + t('quotaConsultantNote'),
         ),
       );
 
@@ -1142,9 +1195,13 @@ window.__ModuleLoader__.load({
         try {
           var ownFace = {
             configForm: ownForm,
+            depthForm: form,
             t: t,
             commit: function (ops) {
               return commit(OWN_NAMESPACE, ops);
+            },
+            commitGlobal: function (ops) {
+              return commit(NAMESPACE, ops);
             },
             loadCatalog: loadCatalog,
           };
