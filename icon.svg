@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32" role="img" aria-label="Subagent depth">
+  <rect x="10" y="6" width="12" height="3" rx="1.5" fill="#8ea3b8"/>
+  <rect x="7.5" y="11.5" width="17" height="3" rx="1.5" fill="#4a7fb5"/>
+  <rect x="5" y="17" width="22" height="3" rx="1.5" fill="#247bbf"/>
+  <polyline points="12.5,23.5 16,26.5 19.5,23.5" fill="none" stroke="#247bbf" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

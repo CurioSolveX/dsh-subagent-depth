@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Subagent Depth",
+    "description": "Shows the current Subagent recursion depth in the composer tool row and switches it between 1 and 2. The capability is built into DSH; this bundle only adds the shortcut."
+  }
+}

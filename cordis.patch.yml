@@ -1,0 +1,3 @@
+- insert:
+    - id: subagent-depth
+      name: 'dsh-subagent-depth'
