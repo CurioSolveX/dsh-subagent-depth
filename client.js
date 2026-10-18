@@ -71,6 +71,8 @@ window.__ModuleLoader__.load({
       consultantTitle: 'Consultant',
       consultantEnabled: 'Enable the consultant',
       consultantLevel0: 'Level 0 consultant',
+      consultantLevel0Short: 'Level 0 consultant',
+      consultantLevel1Short: 'Level 1 consultant',
       consultantLevel1: 'Level 1 consultant',
       consultantProvider: 'Provider',
       consultantModel: 'Model',
@@ -103,6 +105,8 @@ window.__ModuleLoader__.load({
       consultantTitle: '意见专家',
       consultantEnabled: '启用意见专家',
       consultantLevel0: '0 级顾问（主 Agent 问的）',
+      consultantLevel0Short: '0 级顾问',
+      consultantLevel1Short: '1 级顾问',
       consultantLevel1: '1 级顾问（子代理问的）',
       consultantProvider: 'provider',
       consultantModel: '模型',
@@ -588,7 +592,7 @@ window.__ModuleLoader__.load({
                 openModel(key);
               },
             },
-            h('span', { className: 'sudg-itemLabel' }, index === 0 ? t('consultantLevel0') : t('consultantLevel1')),
+            h('span', { className: 'sudg-itemLabel' }, index === 0 ? t('consultantLevel0Short') : t('consultantLevel1Short')),
             h('span', { className: 'sudg-itemValue' }, routeOf(index) || t('consultantUnset')),
             h('span', { className: 'sudg-itemArrow' }, Chevron()),
           );
@@ -623,7 +627,7 @@ window.__ModuleLoader__.load({
                 setView('depth');
               },
             },
-            h('span', { className: 'sudg-itemLabel' }, '‹ ' + (modelIndex === 0 ? t('consultantLevel0') : t('consultantLevel1'))),
+            h('span', { className: 'sudg-itemLabel' }, '‹ ' + (modelIndex === 0 ? t('consultantLevel0Short') : t('consultantLevel1Short'))),
           ),
         );
         rows = rows.concat(
@@ -1066,24 +1070,59 @@ window.__ModuleLoader__.load({
         };
 
         /**
-         * Write fields without the revision fence: the chip is a single scalar
-         * owner, and a stale mirror used to turn a click into a silent
-         * "Not saved". Writes still fold back through settings/document-updated.
+         * Read the namespace's current revision straight from the Host. The
+         * shared mirror can lag behind a write made from another surface, and a
+         * stale revision is exactly what turned a click into "Not saved".
+         */
+        var freshRevision = function (namespace) {
+          var settings = ctx.remote && ctx.remote.settings;
+          if (!settings || typeof settings.describe !== 'function') return Promise.resolve(undefined);
+          return Promise.resolve(settings.describe()).then(
+            function (response) {
+              if (!response || response.ok === false) return undefined;
+              var view = response.value;
+              var rows = view && Array.isArray(view.namespaces) ? view.namespaces : [];
+              for (var index = 0; index < rows.length; index += 1) {
+                if (rows[index].ns === namespace) return rows[index].revision;
+              }
+              return undefined;
+            },
+            function () {
+              return undefined;
+            },
+          );
+        };
+
+        /**
+         * Write fields with a freshly read revision, retrying once after a
+         * conflict. The generated Remote requires the revision argument; the
+         * Host skips the check only when it receives `undefined`.
          */
         var commit = function (namespace, ops) {
-          var remote = ctx.remote && ctx.remote.settings;
-          if (remote && typeof remote.mutate === 'function') {
-            return Promise.resolve(remote.mutate(namespace, ops)).then(
-              function (result) {
-                return !(result && result.ok === false);
-              },
-              function () {
-                return false;
-              },
-            );
-          }
-          var target = namespace === NAMESPACE ? form : ownForm;
-          return target.mutate(ops);
+          var send = function (revision) {
+            var settings = ctx.remote && ctx.remote.settings;
+            if (settings && typeof settings.mutate === 'function') {
+              return Promise.resolve(settings.mutate(namespace, ops, revision)).then(
+                function (result) {
+                  return !(result && result.ok === false);
+                },
+                function () {
+                  return false;
+                },
+              );
+            }
+            var target = namespace === NAMESPACE ? form : ownForm;
+            return target.mutate(ops, revision);
+          };
+          var attempt = function (remaining) {
+            return freshRevision(namespace).then(function (revision) {
+              return send(revision).then(function (accepted) {
+                if (accepted !== false) return true;
+                return remaining > 0 ? attempt(remaining - 1) : false;
+              });
+            });
+          };
+          return attempt(1);
         };
 
         var face = {
