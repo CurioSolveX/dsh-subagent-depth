@@ -68,28 +68,37 @@ window.__ModuleLoader__.load({
     };
 
     var CSS = [
-      '.sudg-root{display:inline-flex;align-items:center;gap:6px;height:28px;',
-      'padding:0 8px;border:0;border-radius:8px;background:transparent;',
+      '.sudg-root{display:inline-flex;align-items:center;gap:5px;height:28px;',
+      'padding:0 7px;border:0;border-radius:8px;background:transparent;',
       'color:var(--dsw-alias-label-primary);font:inherit;font-size:13px;',
       'line-height:1;white-space:nowrap;cursor:pointer;user-select:none;',
-      'outline:none;}',
-      '.sudg-root:hover{background:var(--dsw-alias-bg-layer-2);}',
+      'outline:none;transition:background .12s ease;}',
+      // bg-layer-2 equals the composer surface (#2C2C2E), so hovering it changed
+      // nothing. The permission chip sits on #3D3D3E when hovered, which is what
+      // the shipped hover surface token resolves to.
+      '.sudg-root:hover,.sudg-root[data-open="true"]',
+      '{background:var(--dsw-alias-bg-layer-4,rgba(255,255,255,.075));}',
       '.sudg-root:focus-visible{box-shadow:0 0 0 2px var(--dsw-alias-brand-primary);}',
-      '.sudg-root[data-open="true"]{background:var(--dsw-alias-bg-layer-2);}',
       '.sudg-root[data-failed="true"]{color:var(--dsw-alias-state-error-primary);}',
       '.sudg-chevron{flex:none;opacity:.7;transition:transform .12s ease;}',
       '.sudg-root[data-open="true"] .sudg-chevron{transform:rotate(180deg);}',
+      // Measured targets on this theme: the permission menu panel is #2E2F35,
+      // bg-overlay rendered #61666B (a translucent light wash) and bg-layer-1
+      // #232324 (too dark). bg-layer-2 lands on #2C2C2E, the closest surface.
       '.sudg-menu{position:fixed;z-index:2147483000;box-sizing:border-box;',
-      'padding:6px;border-radius:12px;border:.5px solid var(--dsw-alias-border-l2);',
-      'background:var(--dsw-alias-bg-overlay);box-shadow:0 12px 32px rgba(0,0,0,.45);}',
-      '.sudg-item{display:flex;align-items:center;gap:8px;padding:7px 10px;',
-      'border-radius:8px;color:var(--dsw-alias-label-primary);font-size:13px;',
-      'line-height:1.25;cursor:pointer;}',
-      '.sudg-item:hover,.sudg-item[data-active="true"]{background:var(--dsw-alias-bg-layer-2);}',
-      '.sudg-num{flex:none;width:10px;text-align:right;opacity:.55;',
+      'width:max-content;max-width:260px;padding:4px;border-radius:10px;',
+      'border:.5px solid var(--dsw-alias-border-l2);',
+      'background:var(--dsw-alias-bg-layer-2,#2C2C2E);',
+      'box-shadow:0 10px 26px rgba(0,0,0,.42);}',
+      '.sudg-item{display:flex;align-items:center;gap:6px;padding:5px 8px;',
+      'border-radius:6px;color:var(--dsw-alias-label-primary);font-size:13px;',
+      'line-height:1.2;white-space:nowrap;cursor:pointer;}',
+      '.sudg-item:hover,.sudg-item[data-active="true"]',
+      '{background:var(--dsw-alias-bg-layer-4,rgba(255,255,255,.075));}',
+      '.sudg-num{flex:none;width:9px;text-align:right;opacity:.55;',
       'font-variant-numeric:tabular-nums;}',
-      '.sudg-label{flex:1 1 auto;white-space:nowrap;}',
-      '.sudg-check{flex:none;opacity:0;color:var(--dsw-alias-brand-primary);}',
+      '.sudg-label{flex:1 1 auto;}',
+      '.sudg-check{flex:none;margin-left:2px;opacity:0;}',
       '.sudg-item[data-current="true"] .sudg-check{opacity:1;}',
     ].join('');
 
@@ -284,7 +293,6 @@ window.__ModuleLoader__.load({
           style: {
             left: menuBox.left + 'px',
             bottom: menuBox.bottom + 'px',
-            minWidth: MENU_WIDTH + 'px',
           },
         },
         options.map(function (option) {
