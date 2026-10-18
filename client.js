@@ -47,8 +47,12 @@ window.__ModuleLoader__.load({
 
     /** Settings namespace that owns Subagent recursion depth. */
     var NAMESPACE = 'subagent';
+    /** Settings namespace that owns this plugin's own settings (caps, reviewer, consultant). */
+    var OWN_NAMESPACE = 'subagent-depth';
     /** Compact controls at the left of the composer tool row. */
     var SLOT = 'conversation.input.left';
+    /** Bundle page seat for this bundle's own configuration. */
+    var CONFIG_SLOT = 'plugins.bundle.config';
     /** Registry namespace of this plugin's own copy. */
     var I18N = 'subagent-depth';
     /** Schema default of `subagent.maxDepth` when the profile does not override it. */
@@ -64,6 +68,20 @@ window.__ModuleLoader__.load({
       level2: 'One level of children',
       busy: 'Saving…',
       failed: 'Not saved',
+      consultantTitle: 'Consultant',
+      consultantEnabled: 'Enable the consultant',
+      consultantLevel0: 'Level 0 consultant',
+      consultantLevel1: 'Level 1 consultant',
+      consultantProvider: 'Provider',
+      consultantModel: 'Model',
+      consultantMode: 'When to ask',
+      consultantModeSmart: 'Only when complex',
+      consultantModeAlways: 'Every delegation',
+      consultantScreener: 'Screener model (optional)',
+      consultantHint:
+        'The consultant only advises: the working agent still decides how many subagents to start, which model each uses, and what counts as acceptable. Leave a level blank to disable it. Fill routes that already exist in this DSH (Kimi, Claude, GPT, Gemini, GLM …).',
+      consultantSaved: 'Saved',
+      consultantDirty: 'Editing…',
     };
     var zh = {
       name: '树深阈',
@@ -73,6 +91,20 @@ window.__ModuleLoader__.load({
       level2: '可递归一层',
       busy: '保存中…',
       failed: '未保存',
+      consultantTitle: '意见专家',
+      consultantEnabled: '启用意见专家',
+      consultantLevel0: '0 级顾问（主 Agent 问的）',
+      consultantLevel1: '1 级顾问（子代理问的）',
+      consultantProvider: 'provider',
+      consultantModel: '模型',
+      consultantMode: '什么时候问',
+      consultantModeSmart: '只在复杂时问',
+      consultantModeAlways: '每次派活都问',
+      consultantScreener: '判断难度的便宜模型（可留空）',
+      consultantHint:
+        '顾问只出主意：派几个人、每人用什么模型、验收标准，仍由做事的 Agent 自己决定。某级留空 = 这一级不启用。填的是这台 DSH 里已经配好的路由（Kimi、Claude、GPT、Gemini、GLM 都可以）。',
+      consultantSaved: '已保存',
+      consultantDirty: '编辑中…',
     };
 
     var CSS = [
@@ -115,6 +147,47 @@ window.__ModuleLoader__.load({
       '.sudg-itemLabel{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;',
       'white-space:nowrap;}',
       '.sudg-check{flex:none;width:14px;height:14px;color:var(--dsw-alias-label-primary);}',
+      /* Bundle-page configuration section (same page where the plugin is listed). */
+      '.sudg-cfg{display:flex;flex-direction:column;gap:12px;padding:16px 0;',
+      'border-top:.5px solid var(--dsw-alias-border-l2);}',
+      '.sudg-cfgHead{display:flex;align-items:center;justify-content:space-between;',
+      'gap:12px;flex-wrap:wrap;}',
+      '.sudg-cfgTitle{font-size:14px;line-height:22px;font-weight:500;',
+      'color:var(--dsw-alias-label-primary);}',
+      '.sudg-cfgHint{font-size:12px;line-height:18px;margin:0;',
+      'color:var(--dsw-alias-label-tertiary);}',
+      '.sudg-cfgGrid{display:grid;grid-template-columns:1fr 1fr;gap:12px;}',
+      '.sudg-cfgCard{display:flex;flex-direction:column;gap:8px;padding:12px;',
+      'border-radius:var(--dsw-radius-md);background:var(--dsw-alias-bg-module-platform);}',
+      '.sudg-cfgField{display:flex;flex-direction:column;gap:4px;min-width:0;}',
+      '.sudg-cfgLabel{font-size:12px;line-height:18px;',
+      'color:var(--dsw-alias-label-tertiary);}',
+      '.sudg-cfgInput{box-sizing:border-box;width:100%;height:32px;border:none;',
+      'border-radius:var(--dsw-radius-sm);background:var(--dsw-alias-bg-base);',
+      'color:var(--dsw-alias-label-primary);font:inherit;font-size:13px;',
+      'padding:0 8px;outline:none;min-width:0;}',
+      '.sudg-cfgInput:focus{box-shadow:0 0 0 2px var(--dsw-focus-ring-color,',
+      'var(--dsw-alias-state-business-primary));}',
+      '.sudg-cfgRow{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}',
+      '.sudg-cfgModes{display:flex;gap:6px;}',
+      '.sudg-mode{padding:4px 10px;border-radius:var(--dsw-radius-sm);',
+      'border:.5px solid var(--dsw-alias-border-l2);background:transparent;',
+      'color:var(--dsw-alias-label-secondary);font:inherit;font-size:12px;',
+      'line-height:18px;cursor:pointer;}',
+      '.sudg-mode[aria-pressed="true"]{background:var(--dsw-alias-interactive-bg-hover);',
+      'color:var(--dsw-alias-label-primary);}',
+      '.sudg-switch{position:relative;flex:none;width:40px;height:22px;border:none;',
+      'border-radius:999px;background:var(--dsw-alias-border-l3);cursor:pointer;',
+      'transition:background .12s;padding:0;}',
+      '.sudg-switch[aria-checked="true"]{background:var(--dsw-alias-state-business-primary);}',
+      '.sudg-switch i{position:absolute;top:2px;left:2px;width:18px;height:18px;',
+      'border-radius:50%;background:#fff;transition:transform .12s;}',
+      '.sudg-switch[aria-checked="true"] i{transform:translateX(18px);}',
+      '.sudg-cfgStatus{font-size:12px;line-height:18px;',
+      'color:var(--dsw-alias-label-tertiary);}',
+      '.sudg-cfgStatus[data-failed]{color:var(--dsw-alias-state-error-primary);}',
+      '.sudg-cfgSummary{font-size:13px;line-height:20px;',
+      'color:var(--dsw-alias-label-secondary);}',
     ].join('');
 
     /**
@@ -318,10 +391,16 @@ window.__ModuleLoader__.load({
         setMenuBox(null);
         if (disabled || option === depth) return;
         setState({ pending: true, failed: false });
-        Promise.resolve()
-          .then(function () {
-            return form.set('maxDepth', option);
-          })
+        // A rejected write means the shared settings mirror was behind (a
+        // revision conflict); the controller reloads it on rejection, so one
+        // immediate retry succeeds instead of asking the user to click again.
+        var attempt = function (remaining) {
+          return form.set('maxDepth', option).then(function (accepted) {
+            if (accepted !== false) return true;
+            return remaining > 0 ? attempt(remaining - 1) : false;
+          });
+        };
+        attempt(1)
           .then(function (accepted) {
             setState({ pending: false, failed: accepted === false });
           })
@@ -399,6 +478,204 @@ window.__ModuleLoader__.load({
       }
     }
 
+    /** Coerce a settings value to the text an input shows. */
+    function textOf(value) {
+      return typeof value === 'string' ? value : value === undefined || value === null ? '' : String(value);
+    }
+
+    /** One labelled text input that commits on blur or Enter. */
+    function TextField(props) {
+      var draft = react.useState(textOf(props.value));
+      var value = draft[0];
+      var setValue = draft[1];
+      react.useEffect(
+        function () {
+          setValue(textOf(props.value));
+        },
+        [props.value],
+      );
+      var commit = function () {
+        if (value !== textOf(props.value)) props.commit(value);
+      };
+      return h(
+        'label',
+        { className: 'sudg-cfgField' },
+        h('span', { className: 'sudg-cfgLabel' }, props.label),
+        h('input', {
+          className: 'sudg-cfgInput',
+          type: 'text',
+          value: value,
+          spellCheck: false,
+          placeholder: props.placeholder === undefined ? '' : props.placeholder,
+          onChange: function (event) {
+            setValue(event.target.value);
+          },
+          onBlur: commit,
+          onKeyDown: function (event) {
+            if (event.key === 'Enter') {
+              event.preventDefault();
+              commit();
+            }
+          },
+        }),
+      );
+    }
+
+    /**
+     * The consultant form on this bundle's own page. It reads and writes this
+     * plugin's `subagent-depth` entry through the same `configForms` service the
+     * chip uses; nothing here touches the shipped Subagent page.
+     * @param props - `configForm`, `t`, and the owner's `view`.
+     */
+    function ConsultantPanel(props) {
+      var form = props.configForm;
+      var t = props.t;
+      var subscribe = react.useCallback(
+        function (listener) {
+          return form.subscribe(listener);
+        },
+        [form],
+      );
+      var read = react.useCallback(function () {
+        return form.getSnapshot();
+      }, [form]);
+      var snapshot = react.useSyncExternalStore(subscribe, read);
+
+      var status = react.useState({ pending: false, failed: false });
+      var state = status[0];
+      var setState = status[1];
+
+      if (snapshot === undefined || snapshot === null || snapshot.status !== 'ready') return null;
+
+      var value = snapshot.value === undefined || snapshot.value === null ? {} : snapshot.value;
+      var enabled = value.consultantEnabled === true;
+      var mode = textOf(value.consultantMode) === 'always' ? 'always' : 'smart';
+
+      var write = function (field, next) {
+        setState({ pending: true, failed: false });
+        var attempt = function (remaining) {
+          return form.set(field, next).then(function (accepted) {
+            if (accepted !== false) return true;
+            return remaining > 0 ? attempt(remaining - 1) : false;
+          });
+        };
+        attempt(1).then(
+          function (accepted) {
+            setState({ pending: false, failed: accepted === false });
+          },
+          function () {
+            setState({ pending: false, failed: true });
+          },
+        );
+      };
+
+      if (props.view === 'summary') {
+        return h('span', { className: 'sudg-cfgSummary' }, t('consultantTitle') + ' · ' + (enabled ? 'ON' : 'OFF'));
+      }
+
+      var level = function (index, title) {
+        return h(
+          'div',
+          { className: 'sudg-cfgCard' },
+          h('span', { className: 'sudg-cfgLabel' }, title),
+          h(TextField, {
+            label: t('consultantProvider'),
+            value: value['consultant' + index + 'Provider'],
+            placeholder: 'deepseek-account',
+            commit: function (next) {
+              write('consultant' + index + 'Provider', next);
+            },
+          }),
+          h(TextField, {
+            label: t('consultantModel'),
+            value: value['consultant' + index + 'Model'],
+            placeholder: index === 0 ? 'deepseek-v4-pro' : 'deepseek-flash',
+            commit: function (next) {
+              write('consultant' + index + 'Model', next);
+            },
+          }),
+        );
+      };
+
+      var modeButton = function (id, label) {
+        return h(
+          'button',
+          {
+            type: 'button',
+            className: 'sudg-mode',
+            'aria-pressed': mode === id ? 'true' : 'false',
+            onClick: function () {
+              if (mode !== id) write('consultantMode', id);
+            },
+          },
+          label,
+        );
+      };
+
+      return h(
+        'section',
+        { className: 'sudg-cfg' },
+        h(
+          'div',
+          { className: 'sudg-cfgHead' },
+          h('span', { className: 'sudg-cfgTitle' }, t('consultantTitle')),
+          h(
+            'div',
+            { className: 'sudg-cfgRow' },
+            h('span', { className: 'sudg-cfgLabel' }, t('consultantEnabled')),
+            h(
+              'button',
+              {
+                type: 'button',
+                role: 'switch',
+                className: 'sudg-switch',
+                'aria-checked': enabled ? 'true' : 'false',
+                'aria-label': t('consultantEnabled'),
+                onClick: function () {
+                  write('consultantEnabled', !enabled);
+                },
+              },
+              h('i'),
+            ),
+          ),
+        ),
+        h('p', { className: 'sudg-cfgHint' }, t('consultantHint')),
+        h('div', { className: 'sudg-cfgGrid' }, level(0, t('consultantLevel0')), level(1, t('consultantLevel1'))),
+        h(
+          'div',
+          { className: 'sudg-cfgRow' },
+          h('span', { className: 'sudg-cfgLabel' }, t('consultantMode')),
+          h('div', { className: 'sudg-cfgModes' }, modeButton('smart', t('consultantModeSmart')), modeButton('always', t('consultantModeAlways'))),
+        ),
+        h(
+          'div',
+          { className: 'sudg-cfgGrid' },
+          h(TextField, {
+            label: t('consultantScreener') + ' · provider',
+            value: value.screenerProvider,
+            placeholder: '（留空 = 用主 Agent 自己的模型）',
+            commit: function (next) {
+              write('screenerProvider', next);
+            },
+          }),
+          h(TextField, {
+            label: t('consultantScreener') + ' · model',
+            value: value.screenerModel,
+            placeholder: '',
+            commit: function (next) {
+              write('screenerModel', next);
+            },
+          }),
+        ),
+        h(
+          'span',
+          { className: 'sudg-cfgStatus', 'data-failed': state.failed ? 'true' : undefined },
+          state.pending ? t('busy') : state.failed ? t('failed') : '',
+        ),
+      );
+    }
+
+
     /** Insert this plugin's stylesheet and return its removal. */
     function installStyles() {
       if (typeof document === 'undefined') return function () {};
@@ -444,6 +721,38 @@ window.__ModuleLoader__.load({
             );
           });
         }, 'subagent-depth: composer control');
+
+        // The bundle page's own configuration seat: the only place the
+        // consultant fields can be edited. A failing page must not take the
+        // composer control down with it, so this registration is isolated.
+        try {
+          var ownForm = ctx.configForms.get(OWN_NAMESPACE);
+          var ownFace = { configForm: ownForm, t: t };
+          ctx.effect(function () {
+            return ctx.configForms.whileServed([OWN_NAMESPACE], function () {
+              return ctx.slots.register(
+                {
+                  name: CONFIG_SLOT,
+                  key: 'dsh-subagent-depth',
+                  locale: I18N,
+                  label: function () {
+                    return t('consultantTitle');
+                  },
+                  inject: function () {
+                    return ownFace;
+                  },
+                },
+                function BundleConfigSlot(props) {
+                  return h(ErrorBoundary, null, h(ConsultantPanel, props));
+                },
+              );
+            });
+          }, 'subagent-depth: consultant settings');
+        } catch (pageError) {
+          if (typeof console !== 'undefined' && console.error) {
+            console.error('[dsh-subagent-depth] failed to mount the settings page:', pageError);
+          }
+        }
       } catch (error) {
         // A plugin that cannot mount must not take the composer with it.
         if (typeof console !== 'undefined' && console.error) {
