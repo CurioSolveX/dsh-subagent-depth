@@ -209,12 +209,21 @@ Remove-Item -Path '<profile>\node_modules\dsh-subagent-depth' -Force
 ```
 client.js          浏览器半部：控件本身
 index.js           Host 半部：配置、每层配额、委派评审员、意见专家（delegate / consult）
+test/consultant.mjs 自测：假 ctx 跑真实 apply()，38 项断言，不碰 DSH
 cordis.patch.yml   插入 bundle 行
 locale/en.json     插件列表里的标题与描述
 locale/zh.json
 icon.svg
 docs/              README 截图
 ```
+
+自测（不需要 DSH、不联网）：
+
+```
+node test/consultant.mjs
+```
+
+它只验证 Host 侧逻辑（注册、闸门顺序、两步协议、配额、深度、降级），不代替真机验收；真机证据在 `VERIFY.md`。
 
 Host 半部主要函数：
 
