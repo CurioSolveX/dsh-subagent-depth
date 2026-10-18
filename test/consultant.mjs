@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Local harness for the consultant layer. Runs the real `apply()` against a
  * fake cordis context: no DSH, no network, no profile changes.
  *
@@ -102,7 +102,7 @@ function makeCtx(world) {
     llm: {
       stream(options) {
         const system = String(options.system ?? '');
-        const kind = system.includes('任务分诊员') ? 'screener' : system.includes('意见专家') ? 'consultant' : 'other';
+        const kind = system.includes('任务分诊员') ? 'screener' : system.includes('Consultant') ? 'consultant' : 'other';
         world.calls.push({
           kind,
           provider: options.provider,

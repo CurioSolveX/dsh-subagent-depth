@@ -1245,4 +1245,70 @@ function installConsultant(ctx, config) {
 export function apply(ctx, config) {
   ctx.effect(() => installGuard(ctx, config), 'subagent-depth: per-level quota and delegation reviewer');
   installConsultant(ctx, config);
+  installQuotaInvariants(ctx);
+}
+
+/**
+ * Keep the two settings entries consistent after any edit, from either page.
+ *
+ * The dependency chain is strict: without level 1 there can be no level 2, and
+ * without level-1 workers the level-0 consultant has nobody to advise. The
+ * shipped global limit is a projection of the resulting numbers and can never be
+ * zero, because its schema rejects that.
+ * @param ctx - plugin context.
+ */
+function installQuotaInvariants(ctx) {
+  let busy = false;
+  const reconcile = async () => {
+    if (busy) return;
+    if (typeof ctx.get !== 'function') return;
+    const settings = ctx.get('settings');
+    if (settings === undefined) return;
+    busy = true;
+    try {
+      let rows = settings.describe();
+      const own = rows.find((row) => row.ns === 'subagent-depth');
+      const sub = rows.find((row) => row.ns === 'subagent');
+      if (own === undefined || sub === undefined) return;
+
+      const depth = Number(sub.value.maxDepth);
+      const level1 = Number(own.value.level1);
+      const level2 = Number(own.value.level2);
+      const desired1 = depth >= 1 ? level1 : 0;
+      let desired2 = depth >= 2 ? level2 : 0;
+      if (desired1 === 0) desired2 = 0;
+
+      const enable = own.value.consultantEnabled === true;
+      const has0 = own.value.consultant0Provider !== '' && own.value.consultant0Model !== '';
+      const has1 = own.value.consultant1Provider !== '' && own.value.consultant1Model !== '';
+      const consultants =
+        (depth >= 1 && desired1 > 0 && enable && has0 ? 1 : 0) + (depth >= 2 && desired2 > 0 && enable && has1 ? 1 : 0);
+      const desiredGlobal = Math.max(1, desired1 + desired2 + consultants);
+
+      const ops = [];
+      if (desired1 !== level1) ops.push({ op: 'set', path: ['level1'], value: desired1 });
+      if (desired2 !== level2) ops.push({ op: 'set', path: ['level2'], value: desired2 });
+      if (ops.length > 0) {
+        await settings.mutate('subagent-depth', ops, own.revision);
+        rows = settings.describe();
+      }
+
+      const freshSub = rows.find((row) => row.ns === 'subagent');
+      if (freshSub !== undefined && Number(freshSub.value.maxActiveSubagents) !== desiredGlobal) {
+        await settings.mutate('subagent', [{ op: 'set', path: ['maxActiveSubagents'], value: desiredGlobal }], freshSub.revision);
+      }
+    } catch {
+      // A reconciliation that cannot write must never disturb the session.
+    } finally {
+      busy = false;
+    }
+  };
+
+  ctx.effect(() => {
+    const off = ctx.on('settings/document-updated', () => {
+      void reconcile();
+    });
+    void reconcile();
+    return () => off();
+  }, 'subagent-depth: quota invariants');
 }
