@@ -664,6 +664,7 @@ window.__ModuleLoader__.load({
       );
 
       var publish = function () {
+        if (props.disabled === true) return;
         var next = Number(value);
         if (value === '' || !Number.isFinite(next) || next < 0 || Math.floor(next) !== next) return;
         if (next !== props.value) props.commit(next);
@@ -685,6 +686,7 @@ window.__ModuleLoader__.load({
       return h('input', {
         className: 'sudg-cfgInput sudg-quotaNum',
         type: 'number',
+        disabled: props.disabled === true,
         min: 0,
         step: 1,
         value: value,
@@ -1051,17 +1053,24 @@ window.__ModuleLoader__.load({
       var level2 = value.level2 === undefined || value.level2 === null ? 8 : Number(value.level2);
       var safe1 = Number.isFinite(level1) ? level1 : 0;
       var safe2 = Number.isFinite(level2) ? level2 : 0;
-      var sum = safe1 + safe2;
-      var consultants = depth === undefined ? 0 : consultantCount(depth, safe1, safe2, value);
-      var target = depth === undefined ? undefined : derivedLimit(depth, safe1, safe2, value);
+      // Effective levels: without level-1 workers there cannot be level-2
+      // workers, and a depth of 0 or 1 cannot reach level 2 at all. The stored
+      // numbers are kept, but only what is reachable counts.
+      var eff1 = depth !== undefined && depth >= 1 ? safe1 : 0;
+      var eff2 = depth !== undefined && depth >= 2 && eff1 > 0 ? safe2 : 0;
+      var level2Reachable = depth !== undefined && depth >= 2 && eff1 > 0;
+      var consultants = depth === undefined ? 0 : consultantCount(depth, eff1, eff2, value);
+      var target = depth === undefined ? undefined : derivedLimit(depth, eff1, eff2, value);
 
       /**
        * Change one level and keep the shipped global limit equal to the derived
        * ceiling (workers at this depth plus the consultants that can advise them).
        */
       var commitLevel = function (field, next) {
-        var next1 = field === 'level1' ? next : safe1;
-        var next2 = field === 'level2' ? next : safe2;
+        var next1 = field === 'level1' ? next : eff1;
+        var next2 = field === 'level2' ? next : eff2;
+        // The dependency is absolute: no level-1 workers, no level-2 workers.
+        if (next1 === 0) next2 = 0;
         commitOps([{ op: 'set', path: [field], value: next }]).then(function (accepted) {
           if (!accepted || depth === undefined) return;
           var merged = withField(field, next);
@@ -1076,14 +1085,15 @@ window.__ModuleLoader__.load({
        */
       var recalcQuota = function () {
         if (depth === undefined || !Number.isFinite(globalLimit)) return;
-        var l1 = safe1;
-        var l2 = safe2;
+        var l1 = eff1;
+        var l2 = eff2;
         for (var guard = 0; guard < 64; guard += 1) {
           if (derivedLimit(depth, l1, l2, value) <= globalLimit) break;
           if (l2 > 0) l2 -= 1;
           else if (l1 > 0) l1 -= 1;
           else break;
         }
+        if (l1 === 0) l2 = 0;
         var ops = [];
         if (l1 !== safe1) ops.push({ op: 'set', path: ['level1'], value: l1 });
         if (l2 !== safe2) ops.push({ op: 'set', path: ['level2'], value: l2 });
@@ -1130,7 +1140,8 @@ window.__ModuleLoader__.load({
             { className: 'sudg-quotaRow' },
             h('span', { className: 'sudg-quotaLabel' }, t('quotaLevel2')),
             h(NumberField, {
-              value: safe2,
+              value: eff2,
+              disabled: !level2Reachable,
               commit: function (next) {
                 commitLevel('level2', next);
               },
@@ -1160,7 +1171,7 @@ window.__ModuleLoader__.load({
           { className: 'sudg-cfgHint' },
           t('quotaTotalPrefix') +
             ' ' +
-            (depth === undefined ? '—' : String(safe1 + (depth >= 2 ? safe2 : 0))) +
+            (depth === undefined ? '—' : String(eff1 + eff2)) +
             ' ' +
             t('quotaWorkers') +
             ' + ' +
