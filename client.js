@@ -1,9 +1,10 @@
 /**
- * Browser half of `dsh-subagent-depth`.
+ * Browser half of `dsh-subagent-depth` — the "tree depth" control.
  *
- * One compact control in `conversation.input.left` — the left end of the
- * composer tool row, beside the permission and model controls. It shows the
- * maximum Subagent recursion depth and selects 0, 1, or 2.
+ * One compact chip in `conversation.input.left`, the left end of the composer
+ * tool row, beside the permission and model controls. It shows the maximum
+ * Subagent recursion depth and selects 0, 1, or 2 from a menu that opens above
+ * it, the way every other chip in that row behaves.
  *
  * The value is an upper bound, not a command: the agent still decides per task
  * whether delegating is worthwhile. 0 disables Subagents entirely, 1 allows
@@ -15,10 +16,11 @@
  * Settings page and this control can never disagree, and the Host still writes
  * the value into the profile patch through the normal Loader path.
  *
- * Typography matches the neighbouring permission chip: 13px, primary label
- * colour, no border. The explanation is the platform `title` tooltip, the same
- * mechanism the model chip beside it uses — it appears below-right of the
- * pointer and cannot overflow a container.
+ * Three deliberate matches to the permission chip beside it:
+ *   - a native `select` is not used; the OS dropdown it opens cannot be styled
+ *     and would look nothing like the row's other menus;
+ *   - the chip carries a chevron, hover background, and pointer cursor;
+ *   - menu rows highlight on hover and the current level carries a tick.
  *
  * Nothing here may break the composer: registration, styling, and rendering are
  * each isolated, and a render failure unmounts only this control.
@@ -41,13 +43,14 @@ window.__ModuleLoader__.load({
     var I18N = 'subagent-depth';
     /** Schema default of `subagent.maxDepth` when the profile does not override it. */
     var SCHEMA_DEFAULT = 1;
-    /** The depths offered by the selector, in display order. */
+    /** The depths offered by the menu, in display order. */
     var CHOICES = [0, 1, 2];
+    /** Menu width; wide enough for the longest level description. */
+    var MENU_WIDTH = 200;
 
     var en = {
       name: 'Tree depth',
       title: 'Maximum subagent depth',
-      hint: 'A ceiling, not an instruction.',
       level0: 'Off',
       level1: 'Main agent only',
       level2: 'One level of children',
@@ -57,7 +60,6 @@ window.__ModuleLoader__.load({
     var zh = {
       name: '树深阈',
       title: '最大子代理深度',
-      hint: '上限，不是指令',
       level0: '禁用子智能体',
       level1: '仅主 Agent 可派',
       level2: '可递归一层',
@@ -65,26 +67,30 @@ window.__ModuleLoader__.load({
       failed: '未保存',
     };
 
-    // Metrics taken from the neighbouring permission chip in the same row:
-    // 13px label, primary label colour, no border, 8px hover radius.
     var CSS = [
-      '.sudg-root{position:relative;display:inline-flex;align-items:center;gap:4px;',
-      'min-width:0;height:28px;padding:0 6px;border:0;border-radius:8px;',
-      'background:transparent;color:var(--dsw-alias-label-primary);',
-      'font:inherit;font-size:13px;line-height:1;white-space:nowrap;}',
+      '.sudg-root{display:inline-flex;align-items:center;gap:6px;height:28px;',
+      'padding:0 8px;border:0;border-radius:8px;background:transparent;',
+      'color:var(--dsw-alias-label-primary);font:inherit;font-size:13px;',
+      'line-height:1;white-space:nowrap;cursor:pointer;user-select:none;',
+      'outline:none;}',
       '.sudg-root:hover{background:var(--dsw-alias-bg-layer-2);}',
-      '.sudg-name{pointer-events:none;}',
-      '.sudg-select{appearance:none;-webkit-appearance:none;background:transparent;',
-      'border:0;border-radius:5px;padding:2px;cursor:pointer;outline:none;',
-      'color:inherit;font:inherit;font-size:13px;line-height:1;',
+      '.sudg-root:focus-visible{box-shadow:0 0 0 2px var(--dsw-alias-brand-primary);}',
+      '.sudg-root[data-open="true"]{background:var(--dsw-alias-bg-layer-2);}',
+      '.sudg-root[data-failed="true"]{color:var(--dsw-alias-state-error-primary);}',
+      '.sudg-chevron{flex:none;opacity:.7;transition:transform .12s ease;}',
+      '.sudg-root[data-open="true"] .sudg-chevron{transform:rotate(180deg);}',
+      '.sudg-menu{position:fixed;z-index:2147483000;box-sizing:border-box;',
+      'padding:6px;border-radius:12px;border:.5px solid var(--dsw-alias-border-l2);',
+      'background:var(--dsw-alias-bg-overlay);box-shadow:0 12px 32px rgba(0,0,0,.45);}',
+      '.sudg-item{display:flex;align-items:center;gap:8px;padding:7px 10px;',
+      'border-radius:8px;color:var(--dsw-alias-label-primary);font-size:13px;',
+      'line-height:1.25;cursor:pointer;}',
+      '.sudg-item:hover,.sudg-item[data-active="true"]{background:var(--dsw-alias-bg-layer-2);}',
+      '.sudg-num{flex:none;width:10px;text-align:right;opacity:.55;',
       'font-variant-numeric:tabular-nums;}',
-      '.sudg-select:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);',
-      'outline-offset:1px;}',
-      '.sudg-select:disabled{cursor:default;opacity:.55;}',
-      '.sudg-select>option{background:var(--dsw-alias-bg-overlay);',
-      'color:var(--dsw-alias-label-primary);}',
-      '.sudg-root[data-depth="2"] .sudg-select{color:var(--dsw-alias-brand-primary);}',
-      '.sudg-root[data-failed="true"] .sudg-name{color:var(--dsw-alias-state-error-primary);}',
+      '.sudg-label{flex:1 1 auto;white-space:nowrap;}',
+      '.sudg-check{flex:none;opacity:0;color:var(--dsw-alias-brand-primary);}',
+      '.sudg-item[data-current="true"] .sudg-check{opacity:1;}',
     ].join('');
 
     /**
@@ -102,7 +108,7 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * Localized meaning of one depth; empty for values this control does not
+     * Localized meaning of one depth; empty for values this menu does not
      * describe, so an out-of-range setting is shown verbatim rather than
      * mislabelled.
      * @param t - bound translate function.
@@ -115,18 +121,42 @@ window.__ModuleLoader__.load({
       return '';
     }
 
-    /**
-     * The platform tooltip: current state on the first line, the three levels
-     * on the second. Newlines are honoured by the native tooltip.
-     * @param t - bound translate function.
-     * @param depth - current depth.
-     */
-    function tooltip(t, depth) {
-      var current = levelText(t, depth);
-      var head = t('title') + ' · ' + depth + (current === '' ? '' : ' ' + current);
-      var levels =
-        '0 ' + t('level0') + ' ／ 1 ' + t('level1') + ' ／ 2 ' + t('level2');
-      return head + '\n' + levels;
+    /** Small downward chevron marking that this chip opens a menu. */
+    function Chevron() {
+      return h(
+        'svg',
+        {
+          className: 'sudg-chevron',
+          width: 10,
+          height: 10,
+          viewBox: '0 0 10 10',
+          'aria-hidden': 'true',
+        },
+        h('path', {
+          d: 'M2 3.5 L5 6.5 L8 3.5',
+          fill: 'none',
+          stroke: 'currentColor',
+          strokeWidth: 1.3,
+          strokeLinecap: 'round',
+          strokeLinejoin: 'round',
+        }),
+      );
+    }
+
+    /** Check mark marking the current level inside the menu. */
+    function Check() {
+      return h(
+        'svg',
+        { className: 'sudg-check', width: 12, height: 12, viewBox: '0 0 12 12', 'aria-hidden': 'true' },
+        h('path', {
+          d: 'M2.5 6.2 L4.9 8.6 L9.5 3.6',
+          fill: 'none',
+          stroke: 'currentColor',
+          strokeWidth: 1.5,
+          strokeLinecap: 'round',
+          strokeLinejoin: 'round',
+        }),
+      );
     }
 
     /**
@@ -152,22 +182,63 @@ window.__ModuleLoader__.load({
       var state = write[0];
       var setState = write[1];
 
+      var menuState = react.useState(null);
+      var menuBox = menuState[0];
+      var setMenuBox = menuState[1];
+
+      var root = react.useRef(null);
+      var open = menuBox !== null;
+
+      // Close on any press outside the control, and on Escape.
+      react.useEffect(
+        function () {
+          if (!open) return undefined;
+          var onPointer = function (event) {
+            var node = root.current;
+            if (node !== null && node.contains(event.target)) return;
+            setMenuBox(null);
+          };
+          var onKey = function (event) {
+            if (event.key === 'Escape') setMenuBox(null);
+          };
+          document.addEventListener('mousedown', onPointer, true);
+          document.addEventListener('keydown', onKey, true);
+          return function () {
+            document.removeEventListener('mousedown', onPointer, true);
+            document.removeEventListener('keydown', onKey, true);
+          };
+        },
+        [open],
+      );
+
       if (snapshot === undefined || snapshot === null || snapshot.status !== 'ready') return null;
 
       var depth = resolvedDepth(snapshot);
       var disabled = snapshot.writable === false || state.pending;
-      // A profile may hold a depth this control does not offer; keep it visible
-      // instead of silently showing a neighbour.
       var options = CHOICES.indexOf(depth) === -1 ? [depth].concat(CHOICES) : CHOICES;
-      var tip = tooltip(t, depth);
 
-      var change = function (event) {
-        var next = Number(event.target.value);
-        if (disabled || !isFinite(next) || next === depth) return;
+      var toggle = function () {
+        if (disabled) return;
+        if (open) {
+          setMenuBox(null);
+          return;
+        }
+        var node = root.current;
+        if (node === null || typeof node.getBoundingClientRect !== 'function') return;
+        var rect = node.getBoundingClientRect();
+        var viewWidth = window.innerWidth || 1024;
+        var left = Math.max(8, Math.min(rect.left, viewWidth - MENU_WIDTH - 8));
+        // The menu opens upward, like every other menu in this row.
+        setMenuBox({ left: left, bottom: (window.innerHeight || 768) - rect.top + 6 });
+      };
+
+      var choose = function (option) {
+        setMenuBox(null);
+        if (disabled || option === depth) return;
         setState({ pending: true, failed: false });
         Promise.resolve()
           .then(function () {
-            return form.set('maxDepth', next);
+            return form.set('maxDepth', option);
           })
           .then(function (accepted) {
             setState({ pending: false, failed: accepted === false });
@@ -177,34 +248,66 @@ window.__ModuleLoader__.load({
           });
       };
 
-      return h(
-        'label',
+      var chip = h(
+        'div',
         {
+          ref: root,
           className: 'sudg-root',
-          'data-depth': String(depth),
+          role: 'button',
+          tabIndex: 0,
+          'data-open': open ? 'true' : 'false',
           'data-failed': state.failed ? 'true' : 'false',
-          title: tip,
-        },
-        h(
-          'span',
-          { className: 'sudg-name' },
-          state.failed ? t('failed') : state.pending ? t('busy') : t('name'),
-        ),
-        h(
-          'select',
-          {
-            className: 'sudg-select',
-            value: String(depth),
-            disabled: disabled,
-            title: tip,
-            'aria-label': t('title'),
-            onChange: change,
+          'aria-haspopup': 'menu',
+          'aria-expanded': open ? 'true' : 'false',
+          'aria-label': t('title') + ': ' + depth,
+          title: t('title') + ' · ' + depth + ' ' + levelText(t, depth),
+          onClick: toggle,
+          onKeyDown: function (event) {
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              toggle();
+            }
           },
-          options.map(function (option) {
-            return h('option', { key: String(option), value: String(option) }, String(option));
-          }),
-        ),
+        },
+        h('span', null, state.failed ? t('failed') : state.pending ? t('busy') : t('name')),
+        h('span', { className: 'sudg-num', style: { width: 'auto', opacity: 1 } }, String(depth)),
+        h(Chevron),
       );
+
+      if (!open) return chip;
+
+      var menu = h(
+        'div',
+        {
+          className: 'sudg-menu',
+          role: 'menu',
+          style: {
+            left: menuBox.left + 'px',
+            bottom: menuBox.bottom + 'px',
+            minWidth: MENU_WIDTH + 'px',
+          },
+        },
+        options.map(function (option) {
+          return h(
+            'div',
+            {
+              key: String(option),
+              className: 'sudg-item',
+              role: 'menuitemradio',
+              'aria-checked': option === depth ? 'true' : 'false',
+              'data-current': option === depth ? 'true' : 'false',
+              onClick: function () {
+                choose(option);
+              },
+            },
+            h('span', { className: 'sudg-num' }, String(option)),
+            h('span', { className: 'sudg-label' }, levelText(t, option) || String(option)),
+            h(Check),
+          );
+        }),
+      );
+
+      return h(react.Fragment, null, chip, menu);
     }
 
     /**
