@@ -94,7 +94,7 @@ React <select>  ──change──▶  ConfigFormController.set("maxDepth", n)
 
 ### 开启后会发生什么
 
-1. **简单任务照旧。** 直接调 `subagent`，插件用一个便宜模型（默认就是主 Agent 自己的模型）判断难不难；不难就放行，和没装顾问时一样。
+1. **简单任务照旧。** 直接调 `subagent`，插件让**输入栏右侧选的那个主模型**（干活的 CEO 自己）判断难不难；不难就放行，和没装顾问时一样。判断难度没有单独的模型——主模型就是 CEO，再配一个「筛子」只是重复。
 2. **复杂任务会被拦下。** `subagent` 返回一条错误，原文形如
    `This delegation looks complex, so subagent was refused before anything started.`
    并提示你改调 `delegate`。
@@ -105,12 +105,22 @@ React <select>  ──change──▶  ConfigFormController.set("maxDepth", n)
 
 5. **`consult` 工具**：干活卡住时随时问顾问，只答疑、不派活，也不能替你验收。
 
-### 配置（在哪改）
+### 配置（就在输入栏的「树深阈」里）
 
-**插件 → 子代理深度**（这个插件自己的页面）→「意见专家」一节：开关、0 级 / 1 级两条路由、什么时候问、筛子模型，都在那里，改完立即生效。
+点输入栏的 **树深阈**，菜单里除了 0/1/2 三档，还有「意见专家」一节：
 
-> 注意：这些字段**不在**内置的「子智能体」设置页里。那个页面只管内置的 `maxDepth` / 并行上限 / 模型选择；
-> 本插件的配置属于另一个配置节，由插件在自己的页面上渲染。
+```
+0 / 1 / 2                 ← 深度
+────────────────
+意见专家            开/关
+0 级顾问（主 Agent 问的）   deepseek-account/deepseek-v4-pro  ›
+1 级顾问（子代理问的）      deepseek-account/deepseek-flash   ›
+什么时候问           只在复杂时 / 每次派活都问
+```
+
+- 点模型那两行会就地展开**模型目录**（和输入栏右侧的模型菜单是同一份）：按 provider 分组、带搜索；**加了 Kimi 就会出现，删了就没有**。
+- 改完立即生效，所有会话共用；新开对话也在同一位置。
+- 「插件 → 子代理深度」页面里有同一份配置的完整表单，两边同步。
 
 字段对照：
 
@@ -119,10 +129,11 @@ React <select>  ──change──▶  ConfigFormController.set("maxDepth", n)
 | `consultantEnabled` | 总开关。关 = 完全不拦官方派活工具 | `false` |
 | `consultant0Provider` / `consultant0Model` | **0 级**顾问：主 Agent 问的那个 | 空 = 不启用 |
 | `consultant1Provider` / `consultant1Model` | **1 级**顾问：子代理问的那个 | 空 = 不启用 |
-| `consultantMode` | `smart`（先筛难度，难才问）/ `always`（每次派活都问） | `smart` |
-| `screenerProvider` / `screenerModel` | 判断难度的便宜模型；空 = 用主 Agent 自己的模型 | 空 |
+| `consultantMode` | `smart`（先判断难度，难才问）/ `always`（每次派活都问） | `smart` |
 
-两条**独立路由**，可以填不同的模型。填的是 DSH 里**已经配好的** provider / model，所以 Kimi、Claude、GPT、Gemini、GLM 之类都可以——按任务性质挑：
+> `screenerProvider` / `screenerModel` 已废弃（旧配置里还能留着，不再读取）：判断难度一律用主模型。
+
+两条**独立路由**，可以选不同的模型，选的都是这台 DSH 里**已经配好**的路由——Kimi、Claude、GPT、Gemini、GLM 之类都可以，按任务性质挑：
 比如顶层规划用最会做计划的模型，1 级用某个领域专家。
 
 ```yaml

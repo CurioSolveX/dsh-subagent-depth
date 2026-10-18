@@ -77,7 +77,7 @@ window.__ModuleLoader__.load({
       consultantMode: 'When to ask',
       consultantModeSmart: 'Only when complex',
       consultantModeAlways: 'Every delegation',
-      consultantScreener: 'Screener model (optional)',
+      consultantScreenerNote: 'Whether a delegation is complex is judged by the model chosen at the right of the composer - the working model itself, not a second route.',
       consultantHint:
         'The consultant only advises: the working agent still decides how many subagents to start, which model each uses, and what counts as acceptable. Leave a level blank to disable it. Fill routes that already exist in this DSH (Kimi, Claude, GPT, Gemini, GLM …).',
       consultantSaved: 'Saved',
@@ -88,6 +88,9 @@ window.__ModuleLoader__.load({
       consultantLoading: 'Loading models…',
       consultantEmpty: 'No model is configured on this DSH yet.',
       consultantError: 'Could not load the model list',
+      consultantOn: 'On',
+      consultantOff: 'Off',
+      consultantUnset: 'Not set',
     };
     var zh = {
       name: '树深阈',
@@ -106,7 +109,7 @@ window.__ModuleLoader__.load({
       consultantMode: '什么时候问',
       consultantModeSmart: '只在复杂时问',
       consultantModeAlways: '每次派活都问',
-      consultantScreener: '判断难度的便宜模型（可留空）',
+      consultantScreenerNote: '「难不难」由输入栏右侧选的主模型（干活的 CEO）自己判断，不再单独配一个模型。',
       consultantHint:
         '顾问只出主意：派几个人、每人用什么模型、验收标准，仍由做事的 Agent 自己决定。某级留空 = 这一级不启用。填的是这台 DSH 里已经配好的路由（Kimi、Claude、GPT、Gemini、GLM 都可以）。',
       consultantSaved: '已保存',
@@ -117,6 +120,9 @@ window.__ModuleLoader__.load({
       consultantLoading: '正在读取模型列表…',
       consultantEmpty: '这台 DSH 还没有配置任何模型。',
       consultantError: '读不到模型列表',
+      consultantOn: '开',
+      consultantOff: '关',
+      consultantUnset: '未设置',
     };
 
     var CSS = [
@@ -225,6 +231,17 @@ window.__ModuleLoader__.load({
       'color:var(--dsw-alias-label-tertiary);font:inherit;font-size:12px;',
       'text-align:left;}',
       '.sudg-pickerClear:hover{background:var(--dsw-alias-interactive-bg-hover);}',
+      /* Composer chip: consultant section inside the depth menu. */
+      '.sudg-menuScroll{display:flex;flex-direction:column;max-height:min(68vh,430px);',
+      'overflow-y:auto;min-height:0;}',
+      '.sudg-sep{height:.5px;background:var(--dsw-alias-border-l2);margin:4px 0;}',
+      '.sudg-menuTitle{font-size:11px;line-height:18px;padding:4px 8px 2px;',
+      'color:var(--dsw-alias-label-tertiary);}',
+      '.sudg-itemValue{flex:none;max-width:48%;overflow:hidden;text-overflow:ellipsis;',
+      'white-space:nowrap;color:var(--dsw-alias-label-tertiary);font-size:12px;}',
+      '.sudg-itemArrow{flex:none;color:var(--dsw-alias-label-caption);',
+      'display:inline-flex;transform:rotate(-90deg);}',
+      '.sudg-itemArrow svg{width:12px;height:12px;}',
     ].join('');
 
     /**
@@ -367,6 +384,28 @@ window.__ModuleLoader__.load({
       }, [form]);
       var snapshot = react.useSyncExternalStore(subscribe, read);
 
+      // This plugin's own entry: the consultant routes live here, so the same
+      // chip can configure them without leaving the conversation.
+      var ownForm = props.ownForm;
+      var ownSubscribe = react.useCallback(
+        function (listener) {
+          return ownForm.subscribe(listener);
+        },
+        [ownForm],
+      );
+      var ownRead = react.useCallback(function () {
+        return ownForm.getSnapshot();
+      }, [ownForm]);
+      var ownSnapshot = react.useSyncExternalStore(ownSubscribe, ownRead);
+
+      var viewState = react.useState('depth');
+      var view = viewState[0];
+      var setView = viewState[1];
+
+      var catalogState = react.useState({ status: 'idle', groups: [], error: null });
+      var catalog = catalogState[0];
+      var setCatalog = catalogState[1];
+
       var write = react.useState({ pending: false, failed: false });
       var state = write[0];
       var setState = write[1];
@@ -376,6 +415,7 @@ window.__ModuleLoader__.load({
       var setMenuBox = menuState[1];
 
       var root = react.useRef(null);
+      var menuNode = react.useRef(null);
       var open = menuBox !== null;
 
       react.useEffect(
@@ -384,6 +424,8 @@ window.__ModuleLoader__.load({
           var onPointer = function (event) {
             var node = root.current;
             if (node !== null && node.contains(event.target)) return;
+            var menuElement = menuNode.current;
+            if (menuElement !== null && menuElement.contains(event.target)) return;
             setMenuBox(null);
           };
           var onKey = function (event) {
@@ -417,6 +459,7 @@ window.__ModuleLoader__.load({
         var rect = node.getBoundingClientRect();
         var viewWidth = window.innerWidth || 1024;
         var viewHeight = window.innerHeight || 768;
+        setView('depth');
         // `side: "top"` in the Menu primitive: above the anchor, 4px clear.
         setMenuBox({
           left: Math.max(8, Math.min(rect.left, viewWidth - 160)),
@@ -440,6 +483,40 @@ window.__ModuleLoader__.load({
           });
       };
 
+      var consultant = ownSnapshot !== undefined && ownSnapshot !== null && ownSnapshot.status === 'ready' && ownSnapshot.value ? ownSnapshot.value : null;
+      var consultantEnabled = consultant !== null && consultant.consultantEnabled === true;
+      var consultantMode = consultant !== null && textOf(consultant.consultantMode) === 'always' ? 'always' : 'smart';
+      var routeOf = function (index) {
+        if (consultant === null) return '';
+        var routeProvider = textOf(consultant['consultant' + index + 'Provider']);
+        var routeModel = textOf(consultant['consultant' + index + 'Model']);
+        return routeProvider !== '' && routeModel !== '' ? routeProvider + '/' + routeModel : '';
+      };
+      var writeOwn = function (ops) {
+        return Promise.resolve(props.commitOwn(ops)).catch(function () {
+          return false;
+        });
+      };
+      var openModel = function (which) {
+        setView(which);
+        setCatalog({ status: 'loading', groups: [], error: null });
+        props.loadCatalog().then(
+          function (value) {
+            setCatalog({ status: 'ready', groups: value !== null && value !== undefined && Array.isArray(value.groups) ? value.groups : [], error: null });
+          },
+          function (error) {
+            setCatalog({ status: 'error', groups: [], error: String(error && error.message ? error.message : error) });
+          },
+        );
+      };
+      var pickModel = function (index, item) {
+        writeOwn([
+          { op: 'set', path: ['consultant' + index + 'Provider'], value: item.provider },
+          { op: 'set', path: ['consultant' + index + 'Model'], value: item.model },
+        ]);
+        setView('depth');
+      };
+
       var trigger = h(
         'button',
         {
@@ -460,14 +537,9 @@ window.__ModuleLoader__.load({
 
       if (!open) return trigger;
 
-      var menu = h(
-        'div',
-        {
-          className: 'sudg-menu',
-          role: 'menu',
-          style: { left: menuBox.left + 'px', bottom: menuBox.bottom + 'px' },
-        },
-        options.map(function (option) {
+      var rows = [];
+      if (view === 'depth') {
+        rows = options.map(function (option) {
           var current = option === depth;
           return h(
             'button',
@@ -485,7 +557,97 @@ window.__ModuleLoader__.load({
             h('span', { className: 'sudg-itemLabel' }, levelText(t, option) || String(option)),
             current ? h(Check) : null,
           );
-        }),
+        });
+        rows.push(h('div', { key: 'sep', className: 'sudg-sep' }));
+        rows.push(h('div', { key: 'consultantTitle', className: 'sudg-menuTitle' }, t('consultantTitle')));
+        rows.push(
+          h(
+            'button',
+            {
+              key: 'consultantEnabled',
+              type: 'button',
+              className: 'sudg-item',
+              role: 'switch',
+              'aria-checked': consultantEnabled ? 'true' : 'false',
+              onClick: function () {
+                writeOwn([{ op: 'set', path: ['consultantEnabled'], value: !consultantEnabled }]);
+              },
+            },
+            h('span', { className: 'sudg-itemLabel' }, t('consultantEnabled')),
+            h('span', { className: 'sudg-itemValue' }, consultantEnabled ? t('consultantOn') : t('consultantOff')),
+          ),
+        );
+        var routeRow = function (index, key) {
+          return h(
+            'button',
+            {
+              key: key,
+              type: 'button',
+              className: 'sudg-item',
+              onClick: function () {
+                openModel(key);
+              },
+            },
+            h('span', { className: 'sudg-itemLabel' }, index === 0 ? t('consultantLevel0') : t('consultantLevel1')),
+            h('span', { className: 'sudg-itemValue' }, routeOf(index) || t('consultantUnset')),
+            h('span', { className: 'sudg-itemArrow' }, Chevron()),
+          );
+        };
+        rows.push(routeRow(0, 'model0'));
+        rows.push(routeRow(1, 'model1'));
+        rows.push(
+          h(
+            'button',
+            {
+              key: 'consultantMode',
+              type: 'button',
+              className: 'sudg-item',
+              onClick: function () {
+                writeOwn([{ op: 'set', path: ['consultantMode'], value: consultantMode === 'smart' ? 'always' : 'smart' }]);
+              },
+            },
+            h('span', { className: 'sudg-itemLabel' }, t('consultantMode')),
+            h('span', { className: 'sudg-itemValue' }, consultantMode === 'smart' ? t('consultantModeSmart') : t('consultantModeAlways')),
+          ),
+        );
+      } else {
+        var modelIndex = view === 'model0' ? 0 : 1;
+        rows.push(
+          h(
+            'button',
+            {
+              key: 'back',
+              type: 'button',
+              className: 'sudg-item',
+              onClick: function () {
+                setView('depth');
+              },
+            },
+            h('span', { className: 'sudg-itemLabel' }, '‹ ' + (modelIndex === 0 ? t('consultantLevel0') : t('consultantLevel1'))),
+          ),
+        );
+        rows = rows.concat(
+          modelRows({
+            t: t,
+            catalog: catalog,
+            query: '',
+            value: routeOf(modelIndex),
+            onPick: function (item) {
+              pickModel(modelIndex, item);
+            },
+          }),
+        );
+      }
+
+      var menu = h(
+        'div',
+        {
+          ref: menuNode,
+          className: 'sudg-menu',
+          role: 'menu',
+          style: { left: menuBox.left + 'px', bottom: menuBox.bottom + 'px' },
+        },
+        h('div', { className: 'sudg-menuScroll' }, rows),
       );
 
       return h(react.Fragment, null, trigger, menu);
@@ -512,6 +674,71 @@ window.__ModuleLoader__.load({
     /** Coerce a settings value to the text an input shows. */
     function textOf(value) {
       return typeof value === 'string' ? value : value === undefined || value === null ? '' : String(value);
+    }
+
+    /**
+     * Render one catalog's provider groups as menu rows. Shared by the settings
+     * page's picker and the composer chip's inline picker so both list exactly
+     * the same models.
+     * @param options - t, catalog {status, groups, error}, query, current value, onPick.
+     * @returns the row elements.
+     */
+    function modelRows(options) {
+      var t = options.t;
+      var catalog = options.catalog;
+      var needle = textOf(options.query).trim().toLowerCase();
+      var rows = [];
+      if (catalog.status === 'loading') {
+        rows.push(h('div', { key: 'loading', className: 'sudg-pickerEmpty' }, t('consultantLoading')));
+        return rows;
+      }
+      if (catalog.status === 'error') {
+        rows.push(h('div', { key: 'error', className: 'sudg-pickerEmpty' }, t('consultantError') + ' · ' + textOf(catalog.error)));
+        return rows;
+      }
+      var visible = [];
+      var groups = Array.isArray(catalog.groups) ? catalog.groups : [];
+      for (var index = 0; index < groups.length; index += 1) {
+        var group = groups[index];
+        var models = Array.isArray(group.models) ? group.models : [];
+        var providerLabel = textOf(group.name) || textOf(group.id);
+        var matched = [];
+        for (var m = 0; m < models.length; m += 1) {
+          var model = models[m];
+          var modelName = textOf(model.name) || textOf(model.id);
+          var haystack = (providerLabel + ' ' + modelName + ' ' + textOf(group.id) + ' ' + textOf(model.id)).toLowerCase();
+          if (needle === '' || haystack.includes(needle)) {
+            matched.push({ provider: textOf(group.id), model: textOf(model.id), label: modelName });
+          }
+        }
+        if (matched.length > 0) visible.push({ providerLabel: providerLabel, models: matched });
+      }
+      if (visible.length === 0) rows.push(h('div', { key: 'empty', className: 'sudg-pickerEmpty' }, t('consultantEmpty')));
+      visible.forEach(function (entry) {
+        rows.push(h('div', { key: 'g:' + entry.providerLabel, className: 'sudg-pickerGroup' }, entry.providerLabel));
+        entry.models.forEach(function (item) {
+          var id = item.provider + '/' + item.model;
+          var current = id === textOf(options.value);
+          rows.push(
+            h(
+              'button',
+              {
+                key: id,
+                type: 'button',
+                className: 'sudg-item',
+                role: 'menuitemradio',
+                'aria-checked': current ? 'true' : 'false',
+                onClick: function () {
+                  options.onPick(item);
+                },
+              },
+              h('span', { className: 'sudg-itemLabel' }, item.label),
+              current ? h(Check) : null,
+            ),
+          );
+        });
+      });
+      return rows;
     }
 
     /**
@@ -588,52 +815,15 @@ window.__ModuleLoader__.load({
         );
       };
 
-      var needle = query.trim().toLowerCase();
-      var visible = [];
-      for (var index = 0; index < catalog.groups.length; index += 1) {
-        var group = catalog.groups[index];
-        var models = Array.isArray(group.models) ? group.models : [];
-        var matched = [];
-        for (var m = 0; m < models.length; m += 1) {
-          var model = models[m];
-          var providerName = textOf(group.name) || textOf(group.id);
-          var modelName = textOf(model.name) || textOf(model.id);
-          var haystack = (providerName + ' ' + modelName + ' ' + textOf(group.id) + ' ' + textOf(model.id)).toLowerCase();
-          if (needle === '' || haystack.includes(needle)) {
-            matched.push({ provider: textOf(group.id), model: textOf(model.id), label: modelName });
-          }
-        }
-        if (matched.length > 0) visible.push({ providerLabel: providerName, models: matched });
-      }
-
-      var rows = [];
-      if (catalog.status === 'loading') rows.push(h('div', { key: 'loading', className: 'sudg-pickerEmpty' }, t('consultantLoading')));
-      else if (catalog.status === 'error') rows.push(h('div', { key: 'error', className: 'sudg-pickerEmpty' }, t('consultantError') + ' · ' + textOf(catalog.error)));
-      else if (visible.length === 0) rows.push(h('div', { key: 'empty', className: 'sudg-pickerEmpty' }, t('consultantEmpty')));
-      visible.forEach(function (entry) {
-        rows.push(h('div', { key: 'g:' + entry.providerLabel, className: 'sudg-pickerGroup' }, entry.providerLabel));
-        entry.models.forEach(function (item) {
-          var id = item.provider + '/' + item.model;
-          var current = id === textOf(props.value);
-          rows.push(
-            h(
-              'button',
-              {
-                key: id,
-                type: 'button',
-                className: 'sudg-item',
-                role: 'menuitemradio',
-                'aria-checked': current ? 'true' : 'false',
-                onClick: function () {
-                  setOpen(false);
-                  props.choose(item.provider, item.model);
-                },
-              },
-              h('span', { className: 'sudg-itemLabel' }, item.label),
-              current ? h(Check) : null,
-            ),
-          );
-        });
+      var rows = modelRows({
+        t: t,
+        catalog: catalog,
+        query: query,
+        value: props.value,
+        onPick: function (item) {
+          setOpen(false);
+          props.choose(item.provider, item.model);
+        },
       });
       if (props.clear !== undefined) {
         rows.push(
@@ -815,30 +1005,7 @@ window.__ModuleLoader__.load({
           h('span', { className: 'sudg-cfgLabel' }, t('consultantMode')),
           h('div', { className: 'sudg-cfgModes' }, modeButton('smart', t('consultantModeSmart')), modeButton('always', t('consultantModeAlways'))),
         ),
-        h(
-          'div',
-          { className: 'sudg-cfgCard' },
-          h(
-            'span',
-            { className: 'sudg-cfgLabel' },
-            t('consultantScreener') + '（留空 = 用主 Agent 自己的模型）',
-          ),
-          h(ModelPicker, {
-            t: t,
-            label: t('consultantModel'),
-            value:
-              textOf(value.screenerProvider) === '' || textOf(value.screenerModel) === ''
-                ? ''
-                : textOf(value.screenerProvider) + '/' + textOf(value.screenerModel),
-            load: props.loadCatalog,
-            choose: function (nextProvider, nextModel) {
-              chooseRoute('screener', nextProvider, nextModel);
-            },
-            clear: function () {
-              chooseRoute('screener', '', '');
-            },
-          }),
-        ),
+        h('p', { className: 'sudg-cfgHint' }, t('consultantScreenerNote')),
         h(
           'span',
           { className: 'sudg-cfgStatus', 'data-failed': state.failed ? 'true' : undefined },
@@ -921,10 +1088,15 @@ window.__ModuleLoader__.load({
 
         var face = {
           form: form,
+          ownForm: ownForm,
           t: t,
           commit: function (ops) {
             return commit(NAMESPACE, ops);
           },
+          commitOwn: function (ops) {
+            return commit(OWN_NAMESPACE, ops);
+          },
+          loadCatalog: loadCatalog,
         };
 
         ctx.effect(function () {

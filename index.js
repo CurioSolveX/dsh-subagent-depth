@@ -102,11 +102,15 @@ export const Config = z.object({
     .default('smart')
     .description('smart = 先用便宜模型判断难度，难才问专家；always = 每次派活都问。')
     .volatile(),
-  /** Screener route; empty means "use the caller's own route". */
+  /**
+   * Deprecated and unused: the screener is always the working model — the one
+   * the user picked at the right of the composer. Kept so an older profile
+   * patch that still carries these keys keeps loading.
+   */
   screenerProvider: z
     .string()
     .default('')
-    .description('判断「难不难」用的便宜模型；留空就用做事的 Agent 自己的模型。')
+    .description('（已废弃，不再读取：判断难度一律用输入栏右侧选的主模型。）')
     .volatile(),
   screenerModel: z.string().default('').volatile(),
 });
@@ -368,9 +372,10 @@ function screenerText(config, tree, need, task) {
  * @returns whether to consult; failures count as complex.
  */
 async function needsConsultant(ctx, config, agent, tree, need, task, signal) {
-  const provider = text(config, 'screenerProvider');
-  const model = text(config, 'screenerModel');
-  const route = provider !== '' && model !== '' ? { provider, model } : parentRoute(agent);
+  // The screener IS the working model — the "CEO" the user picked in the
+  // composer. There is deliberately no separate screener route: one more model
+  // to configure would only be a second opinion about the CEO's own judgement.
+  const route = parentRoute(agent);
   if (route === undefined) {
     return true;
   }
