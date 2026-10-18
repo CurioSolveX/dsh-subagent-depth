@@ -80,20 +80,20 @@ export const Config = z.object({
   consultantEnabled: z
     .boolean()
     .default(false)
-    .description('开启后，派活前可以先咨询「意见专家」；专家只出主意，决定权仍在做事的 Agent。')
+    .description('开启后，派活前可以先咨询「Consultant」；专家只出主意，决定权仍在做事的 Agent。')
     .volatile(),
   /** Level-0 consultant (the one the main agent asks). Both halves empty = off. */
   consultant0Provider: z
     .string()
     .default('')
-    .description('0 级意见专家用哪个模型（填已经在 DSH 里配好的 provider；留空表示这级不启用）。')
+    .description('0 级Consultant用哪个模型（填已经在 DSH 里配好的 provider；留空表示这级不启用）。')
     .volatile(),
   consultant0Model: z.string().default('').volatile(),
   /** Level-1 consultant (the one subagents ask). Both halves empty = off. */
   consultant1Provider: z
     .string()
     .default('')
-    .description('1 级意见专家用哪个模型（可以和 0 级不同，例如 1 级用某个领域专家模型）。')
+    .description('1 级Consultant用哪个模型（可以和 0 级不同，例如 1 级用某个领域专家模型）。')
     .volatile(),
   consultant1Model: z.string().default('').volatile(),
   /** `smart` screens complexity with a cheap call first; `always` consults every time. */
@@ -117,7 +117,7 @@ export const Config = z.object({
 
 /** The consultant's role: advice only, never authority. */
 const CONSULTANT_SYSTEM = [
-  '你是一名「意见专家」（Consultant），不是执行者。',
+  '你是一名「Consultant」（Consultant），不是执行者。',
   '你没有行政权：不派活、不验收、不接手成果。正在做决策的 Agent 会读你的话，但它有权不听、有权改你的人数与分法。',
   '你要给的是能直接执行的意见，不是泛泛而谈：',
   '1. 建议分几个人，每人负责什么（具体到能独立开工）。',
@@ -128,7 +128,7 @@ const CONSULTANT_SYSTEM = [
 
 /** The screener only answers one question, in one shape. */
 const SCREENER_SYSTEM = [
-  '你是任务分诊员，只判断一件事：这次委派复杂到需要先请教意见专家吗？',
+  '你是任务分诊员，只判断一件事：这次委派复杂到需要先请教Consultant吗？',
   '复杂：要拆成多个互不依赖的子任务、跨多个文件或系统、需要专门领域知识、或结论不确定。',
   '不复杂：一件事、一两个文件、主 Agent 自己几步就能做完。',
   '只输出一个 JSON 对象，形如 {"hard":true,"why":"不超过20字"}。不要输出 JSON 以外的任何文字。',
@@ -436,7 +436,7 @@ function consultantText(config, tree, level, need, task) {
  */
 async function askConsultant(ctx, config, agent, tree, level, need, task, signal) {
   const route = consultantFor(config, level);
-  if (route === undefined) return { error: '这一级没有配置意见专家', route: undefined };
+  if (route === undefined) return { error: '这一级没有配置Consultant', route: undefined };
   const answer = await askModel(ctx, {
     provider: route.provider,
     model: route.model,
@@ -605,7 +605,7 @@ async function runDelegate(rootCtx, config, adviceOf, args, exec) {
   const parent = exec.agent;
   if (parent === undefined) throw new Error('delegate requires a calling agent (exec.agent was undefined)');
   if (read(config, 'consultantEnabled') !== true) {
-    throw new Error('意见专家没有启用：请直接使用 `subagent` / `subagent_fork` 派活。');
+    throw new Error('Consultant没有启用：请直接使用 `subagent` / `subagent_fork` 派活。');
   }
 
   let tree;
@@ -646,7 +646,7 @@ async function runDelegate(rootCtx, config, adviceOf, args, exec) {
         return {
           kind: 'advice',
           advice: answer.advice,
-          message: `意见专家（${answer.route.provider}/${answer.route.model}）给了建议；还没有派任何人。看完后由你决定人数、模型与验收标准，再带 plan 调用一次。`,
+          message: `Consultant（${answer.route.provider}/${answer.route.model}）给了建议；还没有派任何人。看完后由你决定人数、模型与验收标准，再带 plan 调用一次。`,
         };
       }
       // A consultant that cannot answer must not block the delegation.
@@ -665,8 +665,8 @@ async function runDelegate(rootCtx, config, adviceOf, args, exec) {
       kind: 'unavailable',
       message:
         (route === undefined
-          ? `第 ${callerDepth} 级没有配置意见专家。`
-          : `意见专家（${route.provider}/${route.model}）没有回应：${answer.error}`) +
+          ? `第 ${callerDepth} 级没有配置Consultant。`
+          : `Consultant（${route.provider}/${route.model}）没有回应：${answer.error}`) +
         ' 这次不拦你：直接带 plan 调用一次，按你自己的判断派。',
     };
   }
@@ -674,7 +674,7 @@ async function runDelegate(rootCtx, config, adviceOf, args, exec) {
   return {
     kind: 'advice',
     advice: answer.advice,
-    message: `意见专家（${answer.route.provider}/${answer.route.model}）给了建议；没有启动任何子代理。`,
+    message: `Consultant（${answer.route.provider}/${answer.route.model}）给了建议；没有启动任何子代理。`,
   };
 }
 
@@ -751,7 +751,7 @@ function renderDelegation(toolName, value) {
       {
         type: 'text',
         text:
-          `意见专家（Consultant）的建议：\n\n${result.advice ?? ''}\n\n` +
+          `Consultant（Consultant）的建议：\n\n${result.advice ?? ''}\n\n` +
           `—— 决定权在你。你可以改人数、改分法、换模型、改验收标准，然后带 plan 再调用一次 \`${toolName}\`。` +
           '没有启动任何子代理。',
       },
@@ -772,7 +772,7 @@ function delegateDefinition(rootCtx, config, adviceOf) {
   return {
     name: DELEGATE_TOOL,
     description:
-      'Ask this level\'s consultant (意见专家) and then start YOUR OWN plan for the delegated work. ' +
+      'Ask this level\'s consultant (Consultant) and then start YOUR OWN plan for the delegated work. ' +
       'Use it when a delegation looks complex: the shipped `subagent` tool refuses that case and tells you to come here. ' +
       'STEP 1 (ASK): call with `need` — your own precise statement of what this layer needs: why the goal is hard, how it might split, the constraints, what "done" means — plus `prompt`, the work itself. ' +
       'The consultant for this level answers and NOTHING is started. ' +
@@ -862,7 +862,7 @@ function consultDefinition(rootCtx, config) {
   return {
     name: 'consult',
     description:
-      'Ask this level\'s consultant (意见专家) for an opinion. The consultant has no authority: it does not delegate, does not accept work, and does not take over results — it only gives advice that you may follow or ignore. ' +
+      'Ask this level\'s consultant (Consultant) for an opinion. The consultant has no authority: it does not delegate, does not accept work, and does not take over results — it only gives advice that you may follow or ignore. ' +
       'Use it when you are unsure how to proceed, when you are stuck, when a step failed and you do not understand why, or when you want a second opinion before deciding. ' +
       'It is not a replacement for delegating work, and it cannot approve or verify a result. State your question and the relevant facts precisely: the consultant sees only what you write.',
     parameters: {
@@ -890,7 +890,7 @@ function consultDefinition(rootCtx, config) {
     isConcurrencySafe: () => true,
     async execute(args, exec) {
       if (read(config, 'consultantEnabled') !== true) {
-        throw new Error('意见专家没有启用：在插件设置里打开「顾问」开关，并给对应层级填一个模型。');
+        throw new Error('Consultant没有启用：在插件设置里打开「顾问」开关，并给对应层级填一个模型。');
       }
       const parent = exec.agent;
       if (parent === undefined) throw new Error('consult requires a calling agent');
@@ -900,7 +900,7 @@ function consultDefinition(rootCtx, config) {
       const depth = depthOf(parent);
       const route = consultantFor(config, depth);
       if (route === undefined) {
-        throw new Error(`第 ${depth} 级没有配置意见专家：在设置里给 0 级或 1 级填一个 provider 和 model。`);
+        throw new Error(`第 ${depth} 级没有配置Consultant：在设置里给 0 级或 1 级填一个 provider 和 model。`);
       }
       const answer = await askModel(rootCtx, {
         provider: route.provider,
@@ -910,7 +910,7 @@ function consultDefinition(rootCtx, config) {
         signal: exec.signal,
       });
       if (answer.error !== undefined) {
-        throw new Error(`意见专家（${route.provider}/${route.model}）调用失败：${answer.error}`);
+        throw new Error(`Consultant（${route.provider}/${route.model}）调用失败：${answer.error}`);
       }
       return { advice: answer.text, model: `${route.provider}/${route.model}` };
     },
@@ -1043,7 +1043,7 @@ function consultantFirst(toolName) {
       'Ask the consultant first: call `delegate` with `prompt` plus `need` written in your own words ' +
       '(why it is hard, how it might split, the constraints, what "done" means). Read the advice, decide yourself ' +
       'how many subagents to start, which model each uses, and their acceptance checks, then call `delegate(plan=[...])`. ' +
-      '（中文：这次委派看起来复杂，先调用 delegate 取得意见专家的建议；看完建议后由你自己决定人数、模型与验收标准，再带 plan 派活。）',
+      '（中文：这次委派看起来复杂，先调用 delegate 取得Consultant的建议；看完建议后由你自己决定人数、模型与验收标准，再带 plan 派活。）',
   };
 }
 

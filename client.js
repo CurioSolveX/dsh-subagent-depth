@@ -119,12 +119,12 @@ window.__ModuleLoader__.load({
       level2: '可递归一层',
       busy: '保存中…',
       failed: '未保存',
-      consultantTitle: '意见专家',
-      consultantEnabled: '启用意见专家',
-      consultantLevel0: '0 级顾问（主 Agent 问的）',
-      consultantLevel0Short: '0 级顾问',
-      consultantLevel1Short: '1 级顾问',
-      consultantLevel1: '1 级顾问（子代理问的）',
+      consultantTitle: 'Consultant',
+      consultantEnabled: '启用Consultant',
+      consultantLevel0: '0 级 Consultant（主 Agent 问的）',
+      consultantLevel0Short: '0 级 Consultant',
+      consultantLevel1Short: '1 级 Consultant',
+      consultantLevel1: '1 级 Consultant（子代理问的）',
       consultantProvider: 'provider',
       consultantModel: '模型',
       consultantMode: '什么时候问',
@@ -160,7 +160,7 @@ window.__ModuleLoader__.load({
       quotaTotalSuffix: '个（不含 CEO）。',
       quotaWithCeo: '加 CEO 共',
       quotaRoles: '个角色。',
-      quotaConsultantNote: '意见专家不占这些名额：它们和 CEO 同级，是单独的一次模型调用。',
+      quotaConsultantNote: 'Consultant不占这些名额：它们和 CEO 同级，是单独的一次模型调用。',
     };
 
     var CSS = [
@@ -527,7 +527,7 @@ window.__ModuleLoader__.load({
             // The shipped global limit is derived from the depth that now
             // applies, so switching depth keeps both pages consistent.
             props.commitGlobal([
-              { op: 'set', path: ['maxActiveSubagents'], value: derivedLimit(option, ownLevel1, ownLevel2, ownValue) },
+              { op: 'set', path: ['maxActiveSubagents'], value: Math.max(1, derivedLimit(option, ownLevel1, ownLevel2, ownValue)) },
             ]);
           })
           .catch(function () {
@@ -987,7 +987,7 @@ window.__ModuleLoader__.load({
        */
       var syncGlobal = function (merged) {
         if (depth === undefined) return;
-        props.commitGlobal([{ op: 'set', path: ['maxActiveSubagents'], value: derivedLimit(depth, safe1, safe2, merged) }]);
+        props.commitGlobal([{ op: 'set', path: ['maxActiveSubagents'], value: Math.max(1, derivedLimit(depth, safe1, safe2, merged)) }]);
       };
 
       var write = function (field, next) {
@@ -1065,7 +1065,7 @@ window.__ModuleLoader__.load({
         commitOps([{ op: 'set', path: [field], value: next }]).then(function (accepted) {
           if (!accepted || depth === undefined) return;
           var merged = withField(field, next);
-          props.commitGlobal([{ op: 'set', path: ['maxActiveSubagents'], value: derivedLimit(depth, next1, next2, merged) }]);
+          props.commitGlobal([{ op: 'set', path: ['maxActiveSubagents'], value: Math.max(1, derivedLimit(depth, next1, next2, merged)) }]);
         });
       };
 
@@ -1089,7 +1089,7 @@ window.__ModuleLoader__.load({
         if (l2 !== safe2) ops.push({ op: 'set', path: ['level2'], value: l2 });
         var merged = withField('level1', l1);
         merged.level2 = l2;
-        var nextTarget = derivedLimit(depth, l1, l2, merged);
+        var nextTarget = Math.max(1, derivedLimit(depth, l1, l2, merged));
         var finish = function () {
           if (nextTarget !== globalLimit) props.commitGlobal([{ op: 'set', path: ['maxActiveSubagents'], value: nextTarget }]);
         };
@@ -1097,7 +1097,8 @@ window.__ModuleLoader__.load({
         else commitOps(ops).then(function (accepted) { if (accepted) finish(); });
       };
 
-      var mismatch = Number.isFinite(globalLimit) && target !== undefined && globalLimit !== target;
+      var writtenTarget = target === undefined ? undefined : Math.max(1, target);
+      var mismatch = Number.isFinite(globalLimit) && writtenTarget !== undefined && globalLimit !== writtenTarget;
 
       var quota = h(
         'section',
@@ -1142,7 +1143,7 @@ window.__ModuleLoader__.load({
             h(
               'span',
               { className: 'sudg-quotaFixed', 'data-mismatch': mismatch ? 'true' : undefined },
-              (Number.isFinite(globalLimit) ? String(globalLimit) : '—') + ' / ' + (target === undefined ? '—' : String(target)),
+              (Number.isFinite(globalLimit) ? String(globalLimit) : '—') + ' / ' + (target === undefined ? '—' : target === 0 ? '0（内置最小 1）' : String(writtenTarget)),
             ),
           ),
           mismatch
