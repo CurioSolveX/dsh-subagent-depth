@@ -1096,15 +1096,22 @@ function installGuard(ctx, config) {
    */
   const reserved = new Map();
   const RESERVE_MS = 4_000;
-  const liveReservations = (level) => {
-    const list = (reserved.get(level) ?? []).filter((at) => Date.now() - at < RESERVE_MS);
-    reserved.set(level, list);
-    return list.length;
+  const prune = (level) => {
+    const map = reserved.get(level);
+    if (map === undefined) return undefined;
+    for (const [token, at] of map) if (Date.now() - at >= RESERVE_MS) map.delete(token);
+    return map;
   };
+  const liveReservations = (level) => (prune(level)?.size ?? 0);
   const reserve = (level) => {
-    const list = reserved.get(level) ?? [];
-    list.push(Date.now());
-    reserved.set(level, list);
+    const map = prune(level) ?? new Map();
+    const token = {};
+    map.set(token, Date.now());
+    reserved.set(level, map);
+    return token;
+  };
+  const release = (level, token) => {
+    reserved.get(level)?.delete(token);
   };
   return ctx.on('tools/pre-execute', async (exec, next) => {
     if (!DELEGATION_TOOLS.has(exec.name) && exec.name !== DELEGATE_TOOL) return next();
@@ -1127,34 +1134,26 @@ function installGuard(ctx, config) {
     if (tree === undefined) return next();
 
     const level = tree.depth + 1;
+    const cap = capFor(config, level);
 
     // `delegate` without a plan starts nothing: it only collects advice.
     if (exec.name === DELEGATE_TOOL) {
       if (!Array.isArray(args.plan) || args.plan.length === 0) return next();
+      const tokens = [];
+      if (cap !== undefined) {
+        for (let index = 0; index < args.plan.length; index += 1) tokens.push(reserve(level));
+      }
       const verdict = await reviewDecision(ctx, config, exec, tree, level);
-      if (verdict !== undefined) return verdict;
-      for (let index = 0; index < args.plan.length; index += 1) reserve(level);
+      if (verdict !== undefined) {
+        for (const token of tokens) release(level, token);
+        return verdict;
+      }
       return next();
     }
 
-    // 1. Consultant first: a complex delegation is refused, not started.
-    if (enabled) {
-      const prompt = typeof args.prompt === 'string' ? args.prompt : '';
-      const key = `${caller.id}\u0000${hashText(prompt)}`;
-      const deniedAt = blocked.get(key);
-      if (deniedAt !== undefined && Date.now() - deniedAt < BLOCK_TTL_MS) return consultantFirst(exec.name);
-      const hard = text(config, 'consultantMode') === 'always'
-        ? true
-        : await needsConsultant(ctx, config, caller, tree, '', prompt, exec.signal);
-      if (hard) {
-        blocked.set(key, Date.now());
-        return consultantFirst(exec.name);
-      }
-      blocked.delete(key);
-    }
-
-    // 2. Width: cheap and deterministic, so it runs before the reviewer.
-    const cap = capFor(config, level);
+    // Reserve before any await: two delegations issued in one message must not
+    // both observe the same free slot and both start.
+    let token;
     if (cap !== undefined) {
       const live = liveAt(tree.rows, level) + liveReservations(level);
       if (live >= cap) {
@@ -1167,12 +1166,41 @@ function installGuard(ctx, config) {
           },
         };
       }
+      token = reserve(level);
+    }
+    const undo = () => {
+      if (token !== undefined) {
+        release(level, token);
+        token = undefined;
+      }
+    };
+
+    // 1. Consultant first: a complex delegation is refused, not started.
+    if (enabled) {
+      const prompt = typeof args.prompt === 'string' ? args.prompt : '';
+      const key = `${caller.id}\u0000${hashText(prompt)}`;
+      const deniedAt = blocked.get(key);
+      if (deniedAt !== undefined && Date.now() - deniedAt < BLOCK_TTL_MS) {
+        undo();
+        return consultantFirst(exec.name);
+      }
+      const hard = text(config, 'consultantMode') === 'always'
+        ? true
+        : await needsConsultant(ctx, config, caller, tree, '', prompt, exec.signal);
+      if (hard) {
+        undo();
+        blocked.set(key, Date.now());
+        return consultantFirst(exec.name);
+      }
+      blocked.delete(key);
     }
 
-    // 3. Shape: a separate model judges the delegation itself.
+    // 2. Shape: a separate model judges the delegation itself.
     const verdict = await reviewDecision(ctx, config, exec, tree, level);
-    if (verdict !== undefined) return verdict;
-    if (cap !== undefined) reserve(level);
+    if (verdict !== undefined) {
+      undo();
+      return verdict;
+    }
     return next();
   });
 }
