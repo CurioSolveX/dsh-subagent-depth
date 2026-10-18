@@ -258,6 +258,7 @@ function treeLine(config, tree) {
 async function askModel(ctx, request) {
   let answer = '';
   let finished = false;
+  let failure;
   try {
     const stream = ctx.llm.stream({
       provider: request.provider,
@@ -273,19 +274,23 @@ async function askModel(ctx, request) {
       else if (chunk.type === 'finish') {
         finished = true;
         if (chunk.reason.kind !== 'stop') {
-          return undefined;
+          failure =
+            chunk.reason.kind === 'error' && chunk.reason.failure
+              ? `finish=error: ${chunk.reason.failure.message}`
+              : `finish=${chunk.reason.kind}`;
         }
       }
     }
   } catch (error) {
+    failure = String(error?.message ?? error);
     if (ctx.logger && typeof ctx.logger.warn === 'function') {
       ctx.logger.warn('subagent-depth: model call failed: %s', String(error));
     }
-    return undefined;
   }
-  if (!finished) return undefined;
+  if (!finished) return { error: failure ?? 'the stream ended without a finish chunk' };
+  if (failure !== undefined) return { error: failure };
   const trimmed = answer.trim();
-  return trimmed === '' ? undefined : trimmed;
+  return trimmed === '' ? { error: 'the model returned an empty answer' } : { text: trimmed };
 }
 
 /**
@@ -386,8 +391,8 @@ async function needsConsultant(ctx, config, agent, tree, need, task, signal) {
     text: screenerText(config, tree, need, task),
     signal,
   });
-  if (answer === undefined) return true;
-  const hard = parseHard(answer);
+  if (answer.error !== undefined) return true;
+  const hard = parseHard(answer.text);
   return hard === undefined ? true : hard;
 }
 
@@ -432,16 +437,16 @@ function consultantText(config, tree, level, need, task) {
  */
 async function askConsultant(ctx, config, agent, tree, level, need, task, signal) {
   const route = consultantFor(config, level);
-  if (route === undefined) return undefined;
-  const advice = await askModel(ctx, {
+  if (route === undefined) return { error: '这一级没有配置意见专家', route: undefined };
+  const answer = await askModel(ctx, {
     provider: route.provider,
     model: route.model,
     system: CONSULTANT_SYSTEM,
     text: consultantText(config, tree, level, need, task),
     signal,
   });
-  if (advice === undefined) return undefined;
-  return { advice, route };
+  if (answer.error !== undefined) return { error: answer.error, route };
+  return { advice: answer.text, route };
 }
 
 /**
@@ -637,7 +642,7 @@ async function runDelegate(rootCtx, config, adviceOf, args, exec) {
     // calling agent must decide with the advice in hand, not after the fact.
     if (takeAdvice(adviceOf, parent.id) === undefined) {
       const answer = await askConsultant(rootCtx, config, parent, tree, callerDepth, need, task, exec.signal);
-      if (answer !== undefined) {
+      if (answer.advice !== undefined) {
         rememberAdvice(adviceOf, parent.id, answer.advice);
         return {
           kind: 'advice',
@@ -655,15 +660,15 @@ async function runDelegate(rootCtx, config, adviceOf, args, exec) {
   }
 
   const answer = await askConsultant(rootCtx, config, parent, tree, callerDepth, need, task, exec.signal);
-  if (answer === undefined) {
-    const route = consultantFor(config, callerDepth);
+  if (answer.advice === undefined) {
+    const route = answer.route;
     return {
       kind: 'unavailable',
       message:
         (route === undefined
           ? `第 ${callerDepth} 级没有配置意见专家。`
-          : `意见专家（${route.provider}/${route.model}）这次没有回应。`) +
-        '这次不拦你：直接带 plan 调用一次，按你自己的判断派。',
+          : `意见专家（${route.provider}/${route.model}）没有回应：${answer.error}`) +
+        ' 这次不拦你：直接带 plan 调用一次，按你自己的判断派。',
     };
   }
   rememberAdvice(adviceOf, parent.id, answer.advice);
@@ -905,8 +910,10 @@ function consultDefinition(rootCtx, config) {
         text: [question, '', context === '' ? '' : `已知事实：\n${context}`].join('\n'),
         signal: exec.signal,
       });
-      if (answer === undefined) throw new Error('意见专家暂时不可用（调用失败），请自行判断。');
-      return { advice: answer, model: `${route.provider}/${route.model}` };
+      if (answer.error !== undefined) {
+        throw new Error(`意见专家（${route.provider}/${route.model}）调用失败：${answer.error}`);
+      }
+      return { advice: answer.text, model: `${route.provider}/${route.model}` };
     },
   };
 }
@@ -1006,8 +1013,8 @@ async function review(ctx, config, exec, tree, level) {
     text: reviewerText(read(config, 'policy'), exec, tree, level, caps),
     signal: exec.signal,
   });
-  if (answer === undefined) return undefined;
-  return parseVerdict(answer);
+  if (answer.error !== undefined) return undefined;
+  return parseVerdict(answer.text);
 }
 
 /**
