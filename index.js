@@ -57,7 +57,7 @@ const ADVICE_TTL_MS = 15 * 60 * 1000;
 export const name = 'subagent-depth';
 
 /** Services the guard and the consultant layer need; the plugin stays inactive without them. */
-export const inject = ['tools', 'subagents', 'agents', 'llm'];
+export const inject = ['tools', 'subagents', 'agents', 'llm', 'settings'];
 
 export const Config = z.object({
   level1: z.number().step(1).min(0).max(1000).default(5).volatile(),
@@ -1360,7 +1360,17 @@ function installQuotaInvariants(ctx) {
     const off = ctx.on('settings/document-updated', () => {
       void reconcile();
     });
-    void reconcile();
-    return () => off();
+    // The entry's own schema is not yet in the settings document during apply,
+    // so the first pass runs a moment later; a cheap interval also catches edits
+    // made on the shipped page, whose event this plugin may not observe.
+    const timers = [setTimeout(() => void reconcile(), 1500), setTimeout(() => void reconcile(), 5000)];
+    for (const timer of timers) timer.unref?.();
+    const interval = setInterval(() => void reconcile(), 15_000);
+    interval.unref?.();
+    return () => {
+      off();
+      for (const timer of timers) clearTimeout(timer);
+      clearInterval(interval);
+    };
   }, 'subagent-depth: quota invariants');
 }
