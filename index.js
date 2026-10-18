@@ -1090,29 +1090,47 @@ function installGuard(ctx, config) {
   const blocked = new Map();
   /**
    * Slots promised to a caller but not yet visible as running children. Two
-   * delegations issued in the same message both reach pre-execute before either
-   * child is catalogued, so counting only live rows lets both through. A short
-   * reservation closes that window.
+   * delegations issued in one message both reach pre-execute before either child
+   * is catalogued, so counting only live rows lets both through.
+   *
+   * Once those children appear, their reservations must stop counting, or every
+   * burst double-counts its own children and trips the cap early. Each advance
+   * of the live count retires that many reservations.
    */
-  const reserved = new Map();
+  const slots = new Map();
   const RESERVE_MS = 4_000;
-  const prune = (level) => {
-    const map = reserved.get(level);
-    if (map === undefined) return undefined;
-    for (const [token, at] of map) if (Date.now() - at >= RESERVE_MS) map.delete(token);
-    return map;
+  const slotOf = (level) => {
+    let slot = slots.get(level);
+    if (slot === undefined) {
+      slot = { pending: [], lastLive: 0 };
+      slots.set(level, slot);
+    }
+    return slot;
   };
-  const liveReservations = (level) => (prune(level)?.size ?? 0);
+  const observe = (level, live) => {
+    const slot = slotOf(level);
+    const now = Date.now();
+    slot.pending = slot.pending.filter((at) => now - at < RESERVE_MS);
+    if (live > slot.lastLive) {
+      const grown = live - slot.lastLive;
+      slot.pending.splice(0, Math.min(grown, slot.pending.length));
+    }
+    slot.lastLive = live;
+    return slot;
+  };
   const reserve = (level) => {
-    const map = prune(level) ?? new Map();
+    const slot = slotOf(level);
     const token = {};
-    map.set(token, Date.now());
-    reserved.set(level, map);
+    slot.pending.push({ token, at: Date.now() });
     return token;
   };
   const release = (level, token) => {
-    reserved.get(level)?.delete(token);
+    const slot = slots.get(level);
+    if (slot === undefined) return;
+    const index = slot.pending.findIndex((entry) => entry.token === token);
+    if (index !== -1) slot.pending.splice(index, 1);
   };
+  const pendingCount = (slot) => slot.pending.length;
   return ctx.on('tools/pre-execute', async (exec, next) => {
     if (!DELEGATION_TOOLS.has(exec.name) && exec.name !== DELEGATE_TOOL) return next();
     const caller = exec.agent;
@@ -1155,8 +1173,10 @@ function installGuard(ctx, config) {
     // both observe the same free slot and both start.
     let token;
     if (cap !== undefined) {
-      const live = liveAt(tree.rows, level) + liveReservations(level);
-      if (live >= cap) {
+      const live = liveAt(tree.rows, level);
+      const slot = observe(level, live);
+      const used = live + pendingCount(slot);
+      if (used >= cap) {
         return {
           kind: 'ask',
           reason: `level ${level} already holds ${live} live Subagents (cap ${cap})`,
